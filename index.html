@@ -231,7 +231,20 @@
   </div>
 </div>
 
-<!-- ── Confirm ── -->
+<!-- Lightbox -->
+<div class="lb" id="lb" onclick="lbClickOutside(event)">
+  <div class="lb-inner" id="lbInner">
+    <button class="lb-close" onclick="lbClose()">✕</button>
+    <div class="lb-img-wrap"><img id="lbImg" src="" alt="" /></div>
+    <div class="lb-info" id="lbInfo" style="display:none">
+      <div class="lb-title" id="lbTitle"></div>
+      <p class="lb-text" id="lbText" style="display:none"></p>
+      <div class="lb-tags" id="lbTags"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Confirm ── -->
 <div class="confirm-overlay" id="confirmOverlay">
   <div class="confirm-box">
     <div class="confirm-title" id="cTitle">确认删除</div>
@@ -321,7 +334,8 @@ async function loadGallery() {
       const imgEl = p.cover_image
         ? `<img src="${p.cover_image}"
                style="width:100%;height:auto;display:block;"
-               loading="lazy" />`
+               loading="lazy"
+               onclick="lbOpen('${p.cover_image}',${JSON.stringify(p)})" />`
         : `<div style="height:200px;display:flex;align-items:center;justify-content:center;background:var(--bg3)">
              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1">
                <rect x="3" y="3" width="18" height="18" rx="2"/>
@@ -449,6 +463,26 @@ async function deletePost(e, id) {
   try { await SB.deletePost(id); toast('已删除'); loadGallery(); loadProjects(); }
   catch(e) { toast('删除失败','err'); }
 }
+
+// ── Lightbox ──
+function lbOpen(imgUrl, post) {
+  document.getElementById('lbImg').src = imgUrl;
+  document.body.style.overflow = 'hidden';
+  const hasInfo = post && post.title;
+  const info = document.getElementById('lbInfo');
+  info.style.display = hasInfo ? 'block' : 'none';
+  if (hasInfo) {
+    document.getElementById('lbTitle').textContent = post.title || '';
+    const textEl = document.getElementById('lbText');
+    if (post.content) { textEl.textContent = post.content; textEl.style.display='block'; }
+    else { textEl.style.display='none'; }
+    document.getElementById('lbTags').innerHTML = (post.tags||[]).map(t=>`<span class="tag">${t}</span>`).join('');
+  }
+  document.getElementById('lb').classList.add('open');
+}
+function lbClose() { document.getElementById('lb').classList.remove('open'); document.body.style.overflow=''; }
+function lbClickOutside(e) { if(e.target.id==='lb') lbClose(); }
+document.addEventListener('keydown', e => { if(e.key==='Escape') lbClose(); });
 
 // ── Project Modal ──
 function openProjModal() {

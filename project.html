@@ -180,6 +180,22 @@ body{padding-top:60px}
   </div>
 </div>
 
+<!-- Lightbox -->
+<div class="lb" id="lb" onclick="lbClickOutside(event)">
+  <div class="lb-inner" id="lbInner">
+    <button class="lb-close" onclick="lbClose()">✕</button>
+    <button class="lb-nav lb-prev hidden" id="lbPrev" onclick="lbStep(-1)">‹</button>
+    <button class="lb-nav lb-next hidden" id="lbNext" onclick="lbStep(1)">›</button>
+    <div class="lb-img-wrap"><img id="lbImg" src="" alt="" /></div>
+    <div class="lb-strip" id="lbStrip"></div>
+    <div class="lb-info" id="lbInfo" style="display:none">
+      <div class="lb-title" id="lbTitle"></div>
+      <p class="lb-text" id="lbText" style="display:none"></p>
+      <div class="lb-tags" id="lbTags"></div>
+    </div>
+  </div>
+</div>
+
 <script src="app.js"></script>
 <script>
 const params  = new URLSearchParams(location.search);
@@ -292,23 +308,29 @@ function renderTimeline() {
   tl.innerHTML = posts.map((p,i) => {
     const sp = sps.find(s=>s.id===p.sub_project_id);
     const imgs = Array.isArray(p.images) && p.images.length ? p.images : (p.cover_image ? [p.cover_image] : []);
+    // 图片块：自然比例，点击打开灯箱
     let imgBlock = '';
-    if (imgs.length===1) imgBlock=`<div class="tl-images one"><img src="${imgs[0]}" /></div>`;
-    else if (imgs.length===2) imgBlock=`<div class="tl-images two">${imgs.map(u=>`<img src="${u}" />`).join('')}</div>`;
-    else if (imgs.length>=3) imgBlock=`<div class="tl-images many">${imgs.slice(0,6).map(u=>`<img src="${u}" />`).join('')}</div>`;
+    if (imgs.length === 1) {
+      imgBlock = `<div class="tl-images one"><img src="${imgs[0]}" loading="lazy" onclick="lbOpen(${JSON.stringify(imgs)},0,${JSON.stringify(p)})" /></div>`;
+    } else if (imgs.length === 2) {
+      imgBlock = `<div class="tl-images two">${imgs.map((u,idx)=>`<img src="${u}" loading="lazy" onclick="lbOpen(${JSON.stringify(imgs)},${idx},${JSON.stringify(p)})" />`).join('')}</div>`;
+    } else if (imgs.length >= 3) {
+      imgBlock = `<div class="tl-images many">${imgs.slice(0,6).map((u,idx)=>`<img src="${u}" loading="lazy" onclick="lbOpen(${JSON.stringify(imgs)},${idx},${JSON.stringify(p)})" />`).join('')}</div>`;
+    }
+    const isAuth = SB.isLoggedIn();
     return `
       <div class="tl-entry" style="animation-delay:${i*.05}s">
         <div class="tl-dot" style="border-color:${proj.color}55"></div>
         <div class="tl-date">${formatDate(p.created_at)}${sp?` · <span style="color:${proj.color}99">${sp.name}</span>`:''}</div>
         <div class="tl-card card">
-          ${SB.isLoggedIn()?`<div class="card-actions">
-            <button class="btn btn-danger btn-sm btn-icon" onclick="deletePost('${p.id}')" title="删除">
+          ${isAuth ? `<div class="card-actions">
+            <button class="btn btn-danger btn-sm btn-icon" onclick="deletePost(event,'${p.id}')" title="删除">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
             </button>
-          </div>`:''}
+          </div>` : ''}
           ${imgBlock}
           <div class="tl-body">
-            <div class="tl-title">${p.title}</div>
+            <div class="tl-title" onclick="lbOpen(${JSON.stringify(imgs)},0,${JSON.stringify(p)})">${p.title}</div>
             ${p.content?`<p class="tl-text">${p.content}</p>`:''}
             ${(p.tags||[]).length?`<div class="tl-tags">${p.tags.map(t=>`<span class="tag">${t}</span>`).join('')}</div>`:''}
           </div>
@@ -393,14 +415,60 @@ async function submitPost() {
 }
 
 // ── Delete Post ──
-async function deletePost(id) {
+async function deletePost(e, id) {
+  e.stopPropagation();
   const ok=await confirm2('删除记录','确定删除这条进展记录？此操作不可撤销。');
   if(!ok)return;
   try{await SB.deletePost(id);toast('已删除');await loadPosts();}
   catch(e){toast('删除失败','err');}
 }
 
-// ── Edit Project ──
+// ── Lightbox ──
+let _lbImgs = [], _lbIdx = 0;
+function lbOpen(imgs, idx, post) {
+  _lbImgs = imgs || [];
+  _lbIdx  = idx || 0;
+  document.getElementById('lb').classList.add('open');
+  document.body.style.overflow = 'hidden';
+  // info
+  const hasInfo = post && (post.title || post.content);
+  const info = document.getElementById('lbInfo');
+  info.style.display = hasInfo ? 'block' : 'none';
+  if (hasInfo) {
+    document.getElementById('lbTitle').textContent = post.title || '';
+    const textEl = document.getElementById('lbText');
+    if (post.content) { textEl.textContent = post.content; textEl.style.display='block'; }
+    else { textEl.style.display='none'; }
+    document.getElementById('lbTags').innerHTML = (post.tags||[]).map(t=>`<span class="tag">${t}</span>`).join('');
+  }
+  lbRender();
+}
+function lbRender() {
+  document.getElementById('lbImg').src = _lbImgs[_lbIdx] || '';
+  // strip
+  const strip = document.getElementById('lbStrip');
+  if (_lbImgs.length <= 1) { strip.style.display='none'; }
+  else {
+    strip.style.display='flex';
+    strip.innerHTML = _lbImgs.map((u,i)=>
+      `<img src="${u}" class="${i===_lbIdx?'active':''}" onclick="lbGo(${i})" />`
+    ).join('');
+  }
+  document.getElementById('lbPrev').classList.toggle('hidden', _lbIdx===0);
+  document.getElementById('lbNext').classList.toggle('hidden', _lbIdx===_lbImgs.length-1);
+}
+function lbGo(idx) { _lbIdx=idx; lbRender(); }
+function lbStep(d) { _lbIdx=Math.max(0,Math.min(_lbImgs.length-1,_lbIdx+d)); lbRender(); }
+function lbClose() { document.getElementById('lb').classList.remove('open'); document.body.style.overflow=''; }
+function lbClickOutside(e) { if(e.target.id==='lb') lbClose(); }
+document.addEventListener('keydown', e => {
+  if (!document.getElementById('lb').classList.contains('open')) return;
+  if (e.key==='Escape') lbClose();
+  if (e.key==='ArrowLeft')  lbStep(-1);
+  if (e.key==='ArrowRight') lbStep(1);
+});
+
+init();
 function openEditProj() {
   if(!proj)return;
   emColor=proj.color;
