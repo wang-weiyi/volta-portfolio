@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>项目详情 · VOLTA</title>
+<link rel="stylesheet" href="style.css">
+<style>
+body{padding-top:60px}
+.proj-hero{position:relative;min-height:260px;display:flex;flex-direction:column;justify-content:flex-end;padding:2.5rem 2rem;overflow:hidden;border-bottom:1px solid var(--line)}
+.ph-bg{position:absolute;inset:0;z-index:0;background:var(--bg2);transition:background .3s}
+.ph-cover{position:absolute;inset:0;z-index:0;background-size:cover;background-position:center}
+.ph-grad{position:absolute;inset:0;z-index:1;background:linear-gradient(to top,rgba(8,8,8,.96) 0%,rgba(8,8,8,.55) 55%,rgba(8,8,8,.25) 100%)}
+.ph-content{position:relative;z-index:2;max-width:1280px;margin:0 auto;width:100%}
+.ph-label{font-size:11px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin-bottom:.75rem;display:flex;align-items:center;gap:8px}
+.ph-name{font-family:var(--fh);font-size:clamp(2rem,5vw,3.5rem);font-weight:800;letter-spacing:-1.5px;line-height:1.05;margin-bottom:.75rem}
+.ph-desc{font-size:14px;color:var(--mut2);max-width:560px;line-height:1.75;margin-bottom:1.25rem}
+.ph-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.proj-layout{display:grid;grid-template-columns:260px 1fr;max-width:1280px;margin:0 auto;min-height:calc(100vh - 320px)}
+.sidebar{border-right:1px solid var(--line);padding:1.75rem 1.25rem;position:sticky;top:60px;height:calc(100vh - 60px);overflow-y:auto;display:flex;flex-direction:column}
+.sb-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem}
+.sb-title{font-size:11px;font-weight:600;letter-spacing:.15em;text-transform:uppercase;color:var(--muted)}
+.sp-all-btn{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:var(--r);border:1px solid transparent;cursor:pointer;transition:all .18s;text-align:left;width:100%;font-size:13px;color:var(--muted);margin-bottom:4px}
+.sp-all-btn:hover,.sp-all-btn.active{background:var(--bg3);border-color:var(--line2);color:var(--text)}
+.sp-list{display:flex;flex-direction:column;gap:3px}
+.sp-item{display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:var(--r);border:1px solid transparent;cursor:pointer;transition:all .18s;text-align:left;width:100%}
+.sp-item:hover,.sp-item.active{background:var(--bg3);border-color:var(--line2)}
+.sp-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.sp-info{flex:1;min-width:0}
+.sp-name{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sp-cnt{font-size:11px;color:var(--muted)}
+.sp-del{opacity:0;width:20px;height:20px;border-radius:var(--r);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--muted);transition:all .15s}
+.sp-item:hover .sp-del{opacity:1}
+.sp-del:hover{background:rgba(255,60,60,.15);color:#ff6060}
+.sp-new-form{background:var(--bg3);border:1px solid var(--line2);border-radius:var(--r);padding:10px;display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.sb-divider{height:1px;background:var(--line);margin:1rem 0}
+.sb-actions{display:flex;flex-direction:column;gap:6px;margin-top:auto;padding-top:1rem}
+.proj-main{padding:2rem}
+.main-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:2rem;flex-wrap:wrap;gap:1rem}
+.active-name{font-family:var(--fh);font-size:1.5rem;font-weight:800;letter-spacing:-.5px;margin-bottom:4px}
+.active-desc{font-size:13px;color:var(--muted)}
+.empty-state{padding:4rem 2rem;text-align:center;color:var(--muted);border:1px dashed var(--line2);border-radius:var(--rl)}
+.empty-state p{margin-top:8px;font-size:13px}
+.auth-only{display:none}
+.is-auth .auth-only{display:flex}
+@media(max-width:768px){.proj-layout{grid-template-columns:1fr}.sidebar{position:static;height:auto;border-right:none;border-bottom:1px solid var(--line)}.sp-list{flex-direction:row;flex-wrap:wrap}.sp-item{flex:1;min-width:120px}}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <a href="index.html" class="nav-back">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+    返回主页
+  </a>
+  <div style="font-family:var(--fh);font-size:14px;font-weight:700;color:var(--muted)" id="navTitle"></div>
+  <button class="btn btn-acc btn-sm auth-only" id="navPostBtn" onclick="openPostModal()">+ 发布进展</button>
+</nav>
+
+<div class="proj-hero">
+  <div class="ph-bg" id="phBg"></div>
+  <div class="ph-cover" id="phCover"></div>
+  <div class="ph-grad"></div>
+  <div class="ph-content">
+    <div class="ph-label"><span id="phStatus"></span><span>·</span><span id="phSince"></span></div>
+    <h1 class="ph-name" id="phName"></h1>
+    <p class="ph-desc" id="phDesc"></p>
+    <div class="ph-actions">
+      <button class="btn btn-acc btn-sm auth-only" onclick="openPostModal()">+ 发布进展</button>
+      <button class="btn btn-ghost btn-sm auth-only" onclick="openEditProj()">编辑项目</button>
+    </div>
+  </div>
+</div>
+
+<div class="proj-layout">
+  <aside class="sidebar">
+    <div class="sb-head">
+      <span class="sb-title">子项目</span>
+      <button class="btn btn-ghost btn-sm btn-icon auth-only" onclick="toggleNewSp()" title="新建子项目">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+    </div>
+    <div id="newSpForm" class="sp-new-form hidden">
+      <input class="fi" id="newSpName" placeholder="子项目名称…" style="font-size:13px;padding:6px 10px" />
+      <input class="fi" id="newSpDesc" placeholder="简短描述（可选）" style="font-size:13px;padding:6px 10px" />
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-acc btn-sm" onclick="submitNewSp()" style="flex:1">添加</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleNewSp()">取消</button>
+      </div>
+    </div>
+    <button class="sp-all-btn active" id="spAllBtn" onclick="setActiveSp('__all__')">
+      <span id="spAllDot" style="width:8px;height:8px;border-radius:50%;flex-shrink:0"></span>
+      <span style="flex:1">全部进展</span>
+      <span style="font-size:11px;color:var(--muted)" id="spAllCnt">0</span>
+    </button>
+    <div class="sp-list" id="spList"></div>
+    <div class="sb-divider"></div>
+    <div class="sb-actions auth-only" style="display:none" id="sbActions">
+      <button class="btn btn-ghost btn-sm" onclick="openEditProj()" style="justify-content:flex-start">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        编辑项目信息
+      </button>
+      <button class="btn btn-danger btn-sm" onclick="deleteThisProject()" style="justify-content:flex-start">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+        删除此项目
+      </button>
+    </div>
+  </aside>
+  <main class="proj-main">
+    <div class="main-head">
+      <div><div class="active-name" id="activeName"></div><div class="active-desc" id="activeDesc"></div></div>
+      <button class="btn btn-acc btn-sm auth-only" onclick="openPostModal()">+ 发布进展</button>
+    </div>
+    <div class="timeline" id="timeline"><div style="color:var(--muted);font-size:14px">加载中…</div></div>
+  </main>
+</div>
+
+<footer class="footer">
+  <span class="footer-copy">© 2026 VOLTA Studio</span>
+  <a href="index.html" style="font-size:12px;color:var(--muted)">← 返回主页</a>
+</footer>
+
+<!-- Post Modal -->
+<div class="modal-overlay" id="postModal">
+  <div class="modal">
+    <div class="modal-head"><span class="modal-title">发布项目进展</span><button class="modal-close" onclick="closeModal('postModal')">✕</button></div>
+    <div class="fg"><label class="fl">归属子项目（可选）</label><select class="fs" id="ptSp"><option value="">— 记录到整个项目 —</option></select></div>
+    <div class="fg"><label class="fl">标题</label><input class="fi" id="ptTitle" placeholder="今天的进展…" /></div>
+    <div class="fg"><label class="fl">内容</label><textarea class="ft" id="ptContent" placeholder="描述今天的工作、突破或想法…"></textarea></div>
+    <div class="fg">
+      <label class="fl">图片</label>
+      <div class="upload-zone" id="ptZone">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--muted);margin:0 auto"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+        <p>点击或拖拽图片上传</p>
+        <input type="file" id="ptImg" multiple accept="image/*" style="display:none" />
+      </div>
+      <div class="upload-previews" id="ptPreviews"></div>
+    </div>
+    <div class="fg"><label class="fl">标签</label><input class="fi" id="ptTags" placeholder="渲染, WIP, 材质…" /></div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('postModal')">取消</button>
+      <button class="btn btn-acc btn-sm" id="ptSubmit" onclick="submitPost()">发布</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Project Modal -->
+<div class="modal-overlay" id="editModal">
+  <div class="modal">
+    <div class="modal-head"><span class="modal-title">编辑项目</span><button class="modal-close" onclick="closeModal('editModal')">✕</button></div>
+    <div class="fg">
+      <label class="fl">封面图</label>
+      <div class="upload-zone" id="emZone">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--muted);margin:0 auto"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+        <p>点击替换封面图</p>
+        <input type="file" id="emImg" accept="image/*" style="display:none" />
+      </div>
+      <div class="upload-previews" id="emPreviews"></div>
+    </div>
+    <div class="fg"><label class="fl">项目名称</label><input class="fi" id="emName" /></div>
+    <div class="fg"><label class="fl">简介</label><textarea class="ft" id="emDesc" style="min-height:70px"></textarea></div>
+    <div class="fg"><label class="fl">主题色</label><div style="display:flex;gap:8px;flex-wrap:wrap" id="emColors"></div></div>
+    <div class="fg"><label class="fl">状态</label><select class="fs" id="emStatus"><option value="active">进行中</option><option value="paused">暂停</option></select></div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('editModal')">取消</button>
+      <button class="btn btn-acc btn-sm" id="emSubmit" onclick="submitEditProj()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Confirm -->
+<div class="confirm-overlay" id="confirmOverlay">
+  <div class="confirm-box">
+    <div class="confirm-title" id="cTitle">确认删除</div>
+    <p class="confirm-msg" id="cMsg"></p>
+    <div class="confirm-actions">
+      <button class="btn btn-ghost btn-sm" onclick="cResolve(false)">取消</button>
+      <button class="btn btn-danger btn-sm" onclick="cResolve(true)">删除</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script>
+const params  = new URLSearchParams(location.search);
+const projId  = params.get('id');
+let proj      = null;
+let activeSpId= '__all__';
+let emColor   = '#7b61ff';
+let allPosts  = [];
+const postUp  = makeUploader();
+const emUp    = makeUploader();
+
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function openModal(id)  { document.getElementById(id).classList.add('open'); }
+['postModal','editModal'].forEach(id =>
+  document.getElementById(id).addEventListener('click', e => { if(e.target.id===id) closeModal(id); })
+);
+initConfirm();
+
+function updateAuthUI() {
+  const ok = SB.isLoggedIn();
+  document.body.classList.toggle('is-auth', ok);
+  document.getElementById('navPostBtn').style.display = ok ? 'inline-flex' : 'none';
+  document.getElementById('sbActions').style.display  = ok ? 'flex' : 'none';
+  document.querySelectorAll('.auth-only').forEach(el => el.style.display = ok ? 'flex' : 'none');
+}
+
+async function init() {
+  if (!projId) { location.href='index.html'; return; }
+  updateAuthUI();
+  await loadProject();
+  await loadPosts();
+  postUp.mount(document.getElementById('ptZone'), document.getElementById('ptImg'), document.getElementById('ptPreviews'));
+  emUp.mount(document.getElementById('emZone'), document.getElementById('emImg'), document.getElementById('emPreviews'));
+}
+
+async function loadProject() {
+  try {
+    proj = await SB.getProject(projId);
+    if (!proj) { document.body.innerHTML='<div style="padding:4rem;text-align:center;color:var(--muted)">项目未找到 <a href="index.html" style="color:var(--acc)">返回主页</a></div>'; return; }
+    document.title = proj.name + ' · VOLTA';
+    renderHero();
+    renderSidebar();
+  } catch(e) { toast('加载项目失败：'+e.message,'err'); }
+}
+
+async function loadPosts() {
+  try {
+    allPosts = await SB.getPosts({ type:'update', projectId: projId });
+    renderSidebar();
+    renderTimeline();
+  } catch(e) { toast('加载进展失败：'+e.message,'err'); }
+}
+
+function renderHero() {
+  document.getElementById('navTitle').textContent = proj.name;
+  document.getElementById('phName').textContent   = proj.name;
+  document.getElementById('phName').style.color   = proj.color;
+  document.getElementById('phDesc').textContent   = proj.description || '';
+  document.getElementById('phStatus').textContent = proj.status==='active' ? '进行中' : '已暂停';
+  document.getElementById('phSince').textContent  = '始于 ' + formatDate(proj.created_at);
+  document.getElementById('phBg').style.background= `radial-gradient(ellipse 60% 80% at 80% 50%,${proj.color}14 0%,var(--bg2) 70%)`;
+  const cover = document.getElementById('phCover');
+  cover.style.backgroundImage = proj.cover_image ? `url(${proj.cover_image})` : 'none';
+}
+
+function renderSidebar() {
+  if (!proj) return;
+  const sps = proj.sub_projects || [];
+  const allCnt = allPosts.length;
+  const spAllBtn = document.getElementById('spAllBtn');
+  spAllBtn.classList.toggle('active', activeSpId==='__all__');
+  document.getElementById('spAllDot').style.background = proj.color;
+  document.getElementById('spAllCnt').textContent = allCnt;
+  document.getElementById('spList').innerHTML = sps.map(sp => {
+    const cnt = allPosts.filter(p=>p.sub_project_id===sp.id).length;
+    return `
+      <button class="sp-item ${activeSpId===sp.id?'active':''}" onclick="setActiveSp('${sp.id}')">
+        <span class="sp-dot" style="background:${proj.color}99"></span>
+        <span class="sp-info"><span class="sp-name">${sp.name}</span><span class="sp-cnt">${cnt} 条</span></span>
+        ${SB.isLoggedIn()?`<span class="sp-del" onclick="deleteSp(event,'${sp.id}')" title="删除">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </span>`:''}
+      </button>`;
+  }).join('');
+}
+
+function setActiveSp(id) { activeSpId=id; renderSidebar(); renderTimeline(); }
+
+function renderTimeline() {
+  if (!proj) return;
+  const sps = proj.sub_projects || [];
+  let posts;
+  if (activeSpId==='__all__') {
+    document.getElementById('activeName').textContent = '全部进展';
+    document.getElementById('activeName').style.color = proj.color;
+    document.getElementById('activeDesc').textContent = '显示该项目下所有进展记录';
+    posts = allPosts;
+  } else {
+    const sp = sps.find(s=>s.id===activeSpId);
+    document.getElementById('activeName').textContent = sp?.name || '';
+    document.getElementById('activeName').style.color = proj.color;
+    document.getElementById('activeDesc').textContent = sp?.description || '';
+    posts = allPosts.filter(p=>p.sub_project_id===activeSpId);
+  }
+  const tl = document.getElementById('timeline');
+  if (!posts.length) {
+    tl.innerHTML=`<div class="empty-state"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" style="margin:0 auto;opacity:.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg><p>还没有进展记录，点击「发布进展」开始记录</p></div>`;
+    return;
+  }
+  tl.innerHTML = posts.map((p,i) => {
+    const sp = sps.find(s=>s.id===p.sub_project_id);
+    const imgs = Array.isArray(p.images) && p.images.length ? p.images : (p.cover_image ? [p.cover_image] : []);
+    let imgBlock = '';
+    if (imgs.length===1) imgBlock=`<div class="tl-images one"><img src="${imgs[0]}" /></div>`;
+    else if (imgs.length===2) imgBlock=`<div class="tl-images two">${imgs.map(u=>`<img src="${u}" />`).join('')}</div>`;
+    else if (imgs.length>=3) imgBlock=`<div class="tl-images many">${imgs.slice(0,6).map(u=>`<img src="${u}" />`).join('')}</div>`;
+    return `
+      <div class="tl-entry" style="animation-delay:${i*.05}s">
+        <div class="tl-dot" style="border-color:${proj.color}55"></div>
+        <div class="tl-date">${formatDate(p.created_at)}${sp?` · <span style="color:${proj.color}99">${sp.name}</span>`:''}</div>
+        <div class="tl-card card">
+          ${SB.isLoggedIn()?`<div class="card-actions">
+            <button class="btn btn-danger btn-sm btn-icon" onclick="deletePost('${p.id}')" title="删除">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+            </button>
+          </div>`:''}
+          ${imgBlock}
+          <div class="tl-body">
+            <div class="tl-title">${p.title}</div>
+            ${p.content?`<p class="tl-text">${p.content}</p>`:''}
+            ${(p.tags||[]).length?`<div class="tl-tags">${p.tags.map(t=>`<span class="tag">${t}</span>`).join('')}</div>`:''}
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// ── New SubProject ──
+function toggleNewSp() {
+  const f=document.getElementById('newSpForm');
+  f.classList.toggle('hidden');
+  if(!f.classList.contains('hidden')) document.getElementById('newSpName').focus();
+}
+async function submitNewSp() {
+  const name=document.getElementById('newSpName').value.trim();
+  const desc=document.getElementById('newSpDesc').value.trim();
+  if(!name){toast('请填写子项目名称','err');return;}
+  try {
+    await SB.addSubProject({ project_id:projId, name, description:desc });
+    document.getElementById('newSpName').value='';
+    document.getElementById('newSpDesc').value='';
+    toggleNewSp();
+    toast('子项目已添加 ✓');
+    await loadProject();
+    renderSidebar();
+  } catch(e){toast('添加失败：'+e.message,'err');}
+}
+
+// ── Delete SubProject ──
+async function deleteSp(e, spId) {
+  e.stopPropagation();
+  const sp=(proj.sub_projects||[]).find(s=>s.id===spId);
+  const cnt=allPosts.filter(p=>p.sub_project_id===spId).length;
+  const ok=await confirm2('删除子项目',`删除「${sp?.name}」及其 ${cnt} 条进展？此操作不可撤销。`);
+  if(!ok)return;
+  try {
+    await SB.deleteSubProject(spId);
+    if(activeSpId===spId) activeSpId='__all__';
+    toast('已删除');
+    await loadProject();
+    await loadPosts();
+  } catch(e){toast('删除失败','err');}
+}
+
+// ── Delete Project ──
+async function deleteThisProject() {
+  const ok=await confirm2('删除整个项目',`删除项目「${proj?.name}」及其所有内容？此操作不可撤销。`);
+  if(!ok)return;
+  try { await SB.deleteProject(projId); location.href='index.html'; }
+  catch(e){toast('删除失败：'+e.message,'err');}
+}
+
+// ── Post Modal ──
+function openPostModal() {
+  if(!SB.isLoggedIn())return;
+  postUp.reset(document.getElementById('ptPreviews'));
+  ['ptTitle','ptContent','ptTags'].forEach(id=>document.getElementById(id).value='');
+  const sps=proj?.sub_projects||[];
+  document.getElementById('ptSp').innerHTML='<option value="">— 记录到整个项目 —</option>'+
+    sps.map(s=>`<option value="${s.id}" ${s.id===activeSpId&&activeSpId!=='__all__'?'selected':''}>${s.name}</option>`).join('');
+  openModal('postModal');
+}
+async function submitPost() {
+  const btn=document.getElementById('ptSubmit');
+  btn.textContent='上传图片…';btn.disabled=true;
+  try {
+    const files=postUp.getFiles();
+    let urls=[];
+    if(files.length){urls=await uploadImages(files);btn.textContent='保存中…';}
+    const title   =document.getElementById('ptTitle').value.trim();
+    const content =document.getElementById('ptContent').value.trim();
+    const tags    =document.getElementById('ptTags').value.split(/[,，]/).map(t=>t.trim()).filter(Boolean);
+    const spId    =document.getElementById('ptSp').value||null;
+    if(!title){toast('请填写标题','err');btn.textContent='发布';btn.disabled=false;return;}
+    await SB.addPost({type:'update',title,content,tags,projectId:projId,subProjectId:spId,coverImage:urls[0]||null,images:urls});
+    closeModal('postModal');
+    toast('发布成功 ✓');
+    await loadPosts();
+  }catch(e){toast('发布失败：'+e.message,'err');}
+  btn.textContent='发布';btn.disabled=false;
+}
+
+// ── Delete Post ──
+async function deletePost(id) {
+  const ok=await confirm2('删除记录','确定删除这条进展记录？此操作不可撤销。');
+  if(!ok)return;
+  try{await SB.deletePost(id);toast('已删除');await loadPosts();}
+  catch(e){toast('删除失败','err');}
+}
+
+// ── Edit Project ──
+function openEditProj() {
+  if(!proj)return;
+  emColor=proj.color;
+  emUp.reset(document.getElementById('emPreviews'));
+  document.getElementById('emName').value  =proj.name;
+  document.getElementById('emDesc').value  =proj.description||'';
+  document.getElementById('emStatus').value=proj.status;
+  if(proj.cover_image){
+    const item=document.createElement('div');
+    item.className='upload-preview-item';
+    item.innerHTML=`<img src="${proj.cover_image}">`;
+    document.getElementById('emPreviews').appendChild(item);
+  }
+  buildColorPicker('emColors',emColor,c=>{emColor=c;});
+  openModal('editModal');
+}
+async function submitEditProj() {
+  const btn=document.getElementById('emSubmit');
+  btn.textContent='保存中…';btn.disabled=true;
+  try {
+    const files=emUp.getFiles();
+    const coverImage=files.length ? await uploadImage(files[0]) : proj.cover_image;
+    const name  =document.getElementById('emName').value.trim();
+    const desc  =document.getElementById('emDesc').value.trim();
+    const status=document.getElementById('emStatus').value;
+    if(!name){toast('请填写项目名称','err');btn.textContent='保存';btn.disabled=false;return;}
+    await SB.updateProject(projId,{name,description:desc,status,color:emColor,cover_image:coverImage});
+    closeModal('editModal');
+    toast('已保存 ✓');
+    await loadProject();
+    renderTimeline();
+  }catch(e){toast('保存失败：'+e.message,'err');}
+  btn.textContent='保存';btn.disabled=false;
+}
+
+init();
+</script>
+</body>
+</html>
