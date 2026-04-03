@@ -21,20 +21,27 @@
 .hero-stats{display:flex;gap:2.5rem}
 .stat .n{font-family:var(--fh);font-size:2.2rem;font-weight:800;letter-spacing:-1.5px;line-height:1;margin-bottom:3px}
 .stat .l{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+
+/* Gallery */
 .gallery-filters{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:2.5rem}
 .flt{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;padding:5px 14px;border-radius:100px;border:1px solid var(--line2);color:var(--muted);cursor:pointer;transition:all .18s}
 .flt:hover{color:var(--text);border-color:var(--line3)}
 .flt.on{background:var(--acc);color:#000;border-color:var(--acc)}
 .masonry{columns:3;column-gap:14px}
-.g-item{break-inside:avoid;margin-bottom:14px;border-radius:var(--rl);overflow:hidden;border:1px solid var(--line);cursor:pointer;position:relative;background:var(--bg3);transition:border-color .22s,transform .22s}
+.g-item{break-inside:avoid;margin-bottom:14px;border-radius:var(--rl);overflow:hidden;border:1px solid var(--line);position:relative;background:var(--bg3);transition:border-color .22s,transform .22s}
 .g-item:hover{border-color:var(--line2);transform:translateY(-2px)}
-.g-item img{width:100%;height:auto;display:block;}
+.g-item img{width:100%;height:auto;display:block;cursor:zoom-in}
+.g-ph{height:200px;display:flex;align-items:center;justify-content:center;background:var(--bg3)}
+.g-ph svg{opacity:.08}
 .g-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.88) 0%,transparent 55%);opacity:0;transition:opacity .22s;display:flex;flex-direction:column;justify-content:flex-end;padding:1rem;pointer-events:none}
 .g-item:hover .g-overlay{opacity:1}
-.g-overlay-actions{position:absolute;top:8px;right:8px;display:flex;gap:6px;opacity:0;transition:opacity .22s}
-.g-item:hover .g-overlay-actions{opacity:1}
+/* 编辑操作按钮区 — 默认隐藏，登录后且悬停才显示 */
+.g-actions{position:absolute;top:8px;right:8px;display:none;gap:6px;z-index:5}
+.g-item:hover .g-actions{display:flex}
 .g-title{font-family:var(--fh);font-size:14px;font-weight:700;line-height:1.2;margin-bottom:4px}
 .g-cat{font-size:10px;letter-spacing:.12em;text-transform:uppercase}
+
+/* Projects */
 .proj-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
 .proj-card{border-radius:var(--rl);overflow:hidden;border:1px solid var(--line);background:var(--bg2);display:flex;flex-direction:column;text-decoration:none;color:inherit;transition:border-color .22s,transform .22s}
 .proj-card:hover{border-color:var(--line2);transform:translateY(-2px)}
@@ -55,14 +62,15 @@
 .proj-add-card{border-radius:var(--rl);border:1px dashed var(--line2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:2rem;cursor:pointer;min-height:220px;background:transparent;transition:all .18s;color:var(--muted)}
 .proj-add-card:hover{border-color:rgba(200,255,0,.35);background:rgba(200,255,0,.02);color:var(--text)}
 .proj-add-card span{font-size:12px;font-family:var(--fh);font-weight:600;letter-spacing:.08em;text-transform:uppercase}
-/* Loading skeleton */
-.skeleton{background:linear-gradient(90deg,var(--bg3) 25%,var(--bg4) 50%,var(--bg3) 75%);background-size:200% 100%;animation:shimmer 1.5s infinite;border-radius:var(--r)}
-@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
-/* Auth */
-.auth-only{display:none}
-.is-auth .auth-only{display:flex}
+
+/* Auth visibility — 核心：只有 body.is-auth 时才显示管理 UI */
+.auth-only{display:none!important}
+body.is-auth .auth-only{display:flex!important}
+body.is-auth .auth-only-block{display:block!important}
+.auth-only-block{display:none!important}
 .nav-login-btn{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);border:1px solid var(--line2);padding:6px 14px;border-radius:var(--r);transition:all .18s;cursor:pointer}
 .nav-login-btn:hover{color:var(--text);border-color:var(--line3)}
+
 @media(max-width:900px){.masonry{columns:2}.hero-stats{display:none}}
 @media(max-width:580px){.masonry{columns:1}.proj-grid{grid-template-columns:1fr}}
 </style>
@@ -77,6 +85,7 @@
     <a href="#about">关于</a>
   </div>
   <div style="display:flex;align-items:center;gap:10px">
+    <!-- 只有登录后才显示发布按钮 -->
     <button class="btn btn-acc btn-sm auth-only" id="navPublishBtn" onclick="openPostModal()">+ 发布</button>
     <button class="nav-login-btn" id="authBtn" onclick="onAuthClick()">登录</button>
   </div>
@@ -111,7 +120,11 @@
       </div>
     </div>
     <div class="gallery-filters" id="galleryFilters"></div>
-    <div class="masonry" id="galleryGrid"><div class="skeleton" style="height:220px;margin-bottom:14px"></div><div class="skeleton" style="height:280px;margin-bottom:14px"></div><div class="skeleton" style="height:200px;margin-bottom:14px"></div></div>
+    <div class="masonry" id="galleryGrid">
+      <div class="skeleton" style="height:220px;margin-bottom:14px;border-radius:10px"></div>
+      <div class="skeleton" style="height:280px;margin-bottom:14px;border-radius:10px"></div>
+      <div class="skeleton" style="height:200px;margin-bottom:14px;border-radius:10px"></div>
+    </div>
   </div>
 </section>
 
@@ -123,7 +136,10 @@
         <div><div class="sh-label">长期项目</div><h2 class="sh-title">进行中</h2></div>
       </div>
     </div>
-    <div class="proj-grid" id="projGrid"><div class="skeleton" style="height:260px"></div><div class="skeleton" style="height:260px"></div><div class="skeleton" style="height:260px"></div></div>
+    <div class="proj-grid" id="projGrid">
+      <div class="skeleton" style="height:260px;border-radius:10px"></div>
+      <div class="skeleton" style="height:260px;border-radius:10px"></div>
+    </div>
   </div>
 </section>
 
@@ -163,17 +179,17 @@
   </div>
 </div>
 
-<!-- ── Post Modal ── -->
+<!-- ── Post Modal（发布 / 编辑）── -->
 <div class="modal-overlay" id="postModal">
   <div class="modal">
     <div class="modal-head">
-      <span class="modal-title">发布内容</span>
+      <span class="modal-title" id="postModalTitle">发布内容</span>
       <button class="modal-close" onclick="closeModal('postModal')">✕</button>
     </div>
     <div class="fg">
       <label class="fl">类型</label>
       <select class="fs" id="ptType" onchange="onTypeChange()">
-        <option value="gallery">画廊作品（独立展示）</option>
+        <option value="gallery">画廊作品</option>
         <option value="update">项目进展记录</option>
       </select>
     </div>
@@ -187,11 +203,11 @@
     </div>
     <div class="fg"><label class="fl">标题</label><input class="fi" id="ptTitle" placeholder="简洁的标题…" /></div>
     <div class="fg"><label class="fl">内容</label><textarea class="ft" id="ptContent" placeholder="描述这次创作…"></textarea></div>
-    <div class="fg">
+    <div class="fg" id="ptImgWrap">
       <label class="fl">图片</label>
       <div class="upload-zone" id="ptZone">
         <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--muted);margin:0 auto"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
-        <p>点击或拖拽图片上传（上传至 Cloudinary）</p>
+        <p>点击或拖拽图片上传</p>
         <input type="file" id="ptImg" multiple accept="image/*" style="display:none" />
       </div>
       <div class="upload-previews" id="ptPreviews"></div>
@@ -231,20 +247,23 @@
   </div>
 </div>
 
-<!-- Lightbox -->
-<div class="lb" id="lb" onclick="lbClickOutside(event)">
-  <div class="lb-inner" id="lbInner">
+<!-- ── Lightbox ── -->
+<div class="lb" id="lb">
+  <div class="lb-backdrop" onclick="lbClose()"></div>
+  <div class="lb-inner">
     <button class="lb-close" onclick="lbClose()">✕</button>
-    <div class="lb-img-wrap"><img id="lbImg" src="" alt="" /></div>
-    <div class="lb-info" id="lbInfo" style="display:none">
+    <div class="lb-img-wrap">
+      <img id="lbImg" src="" alt="" />
+    </div>
+    <div class="lb-info" id="lbInfo">
       <div class="lb-title" id="lbTitle"></div>
-      <p class="lb-text" id="lbText" style="display:none"></p>
+      <p class="lb-text" id="lbText"></p>
       <div class="lb-tags" id="lbTags"></div>
     </div>
   </div>
 </div>
 
-<!-- Confirm ── -->
+<!-- ── Confirm ── -->
 <div class="confirm-overlay" id="confirmOverlay">
   <div class="confirm-box">
     <div class="confirm-title" id="cTitle">确认删除</div>
@@ -262,51 +281,52 @@ const CAT_COLORS = {'建筑':'#7b61ff','角色':'#ff6b35','环境':'#c8ff00','�
 let activeFilter = 'all';
 let pmColor = PROJ_COLORS[0];
 let _projects = [];
+// 用 Map 存帖子数据，供灯箱使用，避免 JSON 在 HTML 属性里的转义问题
+let _postMap = new Map();
 const postUp = makeUploader();
 const pmUp   = makeUploader();
+let _editingPostId = null;
 
 // ── Helpers ──
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 function openModal(id)  { document.getElementById(id).classList.add('open'); }
 function hidden(id,v)   { document.getElementById(id).classList.toggle('hidden', v); }
 ['postModal','projModal','loginModal'].forEach(id =>
-  document.getElementById(id).addEventListener('click', e => { if(e.target.id===id) closeModal(id); })
+  document.getElementById(id).addEventListener('click', e => { if(e.target===document.getElementById(id)) closeModal(id); })
 );
 initConfirm();
 
+// ── Skeleton CSS（内联避免多一个文件）──
+const sk = document.createElement('style');
+sk.textContent='.skeleton{background:linear-gradient(90deg,var(--bg3) 25%,var(--bg4) 50%,var(--bg3) 75%);background-size:200% 100%;animation:shimmer 1.5s infinite;border-radius:var(--r)}@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}';
+document.head.appendChild(sk);
+
 // ── Auth ──
 function updateAuthUI() {
-  const loggedIn = SB.isLoggedIn();
-  document.body.classList.toggle('is-auth', loggedIn);
-  document.getElementById('authBtn').textContent = loggedIn ? '登出' : '登录';
+  const ok = SB.isLoggedIn();
+  document.body.classList.toggle('is-auth', ok);
+  document.getElementById('authBtn').textContent = ok ? '登出' : '登录';
 }
 function onAuthClick() {
-  if (SB.isLoggedIn()) {
-    SB.signOut();
-    updateAuthUI();
-    toast('已登出');
-  } else {
-    openModal('loginModal');
-  }
+  if (SB.isLoggedIn()) { SB.signOut(); updateAuthUI(); toast('已登出'); loadGallery(); loadProjects(); }
+  else openModal('loginModal');
 }
 async function doLogin() {
-  const btn   = document.getElementById('loginBtn');
+  const btn = document.getElementById('loginBtn');
   const email = document.getElementById('loginEmail').value.trim();
   const pwd   = document.getElementById('loginPwd').value;
   const errEl = document.getElementById('loginErr');
   errEl.style.display = 'none';
   if (!email || !pwd) { errEl.textContent='请填写邮箱和密码'; errEl.style.display='block'; return; }
-  btn.textContent = '登录中…'; btn.disabled = true;
+  btn.textContent='登录中…'; btn.disabled=true;
   try {
     await SB.signIn(email, pwd);
     closeModal('loginModal');
     updateAuthUI();
     toast('登录成功 ✓');
-  } catch(e) {
-    errEl.textContent = '邮箱或密码错误';
-    errEl.style.display = 'block';
-  }
-  btn.textContent = '登录'; btn.disabled = false;
+    loadGallery(); loadProjects();
+  } catch(e) { errEl.textContent='邮箱或密码错误'; errEl.style.display='block'; }
+  btn.textContent='登录'; btn.disabled=false;
 }
 document.getElementById('loginPwd').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
 
@@ -321,36 +341,36 @@ function setFilter(f) { activeFilter=f; renderGalleryFilters(); loadGallery(); }
 async function loadGallery() {
   const grid = document.getElementById('galleryGrid');
   try {
-    let posts = await SB.getPosts({ type:'gallery', noProject: true });
+    let posts = await SB.getPosts({ type:'gallery', noProject:true });
     if (activeFilter !== 'all') posts = posts.filter(p => (p.tags||[]).includes(activeFilter));
+    _postMap.clear();
+    posts.forEach(p => _postMap.set(p.id, p));
+
     if (!posts.length) {
-      grid.innerHTML = `<div style="color:var(--muted);font-size:14px;padding:2rem 0;column-span:all">还没有作品，点击「上传作品」开始。</div>`;
+      grid.innerHTML = `<div style="color:var(--muted);font-size:14px;padding:2rem 0">还没有作品，点击「上传作品」开始。</div>`;
       return;
     }
+    const isAuth = SB.isLoggedIn();
     grid.innerHTML = posts.map(p => {
       const cat   = (p.tags||[]).find(t=>CAT_COLORS[t]);
       const color = cat ? CAT_COLORS[cat] : '#666';
-      // 有封面图：img 自然流动，宽度100%高度自适应，保持原比例
       const imgEl = p.cover_image
-        ? `<img src="${p.cover_image}"
-               style="width:100%;height:auto;display:block;"
-               loading="lazy"
-               onclick="lbOpen('${p.cover_image}',${JSON.stringify(p)})" />`
-        : `<div style="height:200px;display:flex;align-items:center;justify-content:center;background:var(--bg3)">
-             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1">
-               <rect x="3" y="3" width="18" height="18" rx="2"/>
-               <circle cx="8.5" cy="8.5" r="1.5"/>
-               <path d="M21 15l-5-5L5 21"/>
-             </svg>
-           </div>`;
+        ? `<img src="${p.cover_image}" loading="lazy" onclick="lbOpen('${p.id}')" />`
+        : `<div class="g-ph"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></div>`;
+      // 管理按钮：只在 isAuth 时渲染到 DOM，CSS 控制悬停显示
+      const actions = isAuth ? `
+        <div class="g-actions">
+          <button class="btn btn-ghost btn-sm btn-icon" onclick="editPost(event,'${p.id}')" title="编辑">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4z"/></svg>
+          </button>
+          <button class="btn btn-danger btn-sm btn-icon" onclick="deletePost(event,'${p.id}')" title="删除">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+          </button>
+        </div>` : '';
       return `
-        <div class="g-item">
+        <div class="g-item" data-id="${p.id}">
           ${imgEl}
-          <div class="g-overlay-actions auth-only" style="display:${SB.isLoggedIn()?'flex':'none'}">
-            <button class="btn btn-danger btn-sm btn-icon" onclick="deletePost(event,'${p.id}')" title="删除">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
-            </button>
-          </div>
+          ${actions}
           <div class="g-overlay">
             <div class="g-title">${p.title}</div>
             ${cat?`<div class="g-cat" style="color:${color}">${cat}</div>`:''}
@@ -368,15 +388,16 @@ async function loadProjects() {
     const allPosts = await SB.getPosts({ type:'update' });
     const cntMap = {};
     allPosts.forEach(p => { cntMap[p.project_id] = (cntMap[p.project_id]||0)+1; });
+    const isAuth = SB.isLoggedIn();
     grid.innerHTML = _projects.map(p => {
       const cnt = cntMap[p.id] || 0;
       const sps = p.sub_projects || [];
       const cover = p.cover_image
-        ? `<img src="${p.cover_image}" style="width:100%;height:100%;object-fit:cover;position:absolute;inset:0">`
+        ? `<img src="${p.cover_image}">`
         : `<div class="proj-cover-ph"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></div>`;
       return `
         <a class="proj-card" href="project.html?id=${p.id}">
-          <div class="proj-cover" style="position:relative">${cover}<div class="proj-cover-overlay"></div></div>
+          <div class="proj-cover">${cover}<div class="proj-cover-overlay"></div></div>
           <div class="proj-bar" style="background:${p.color}"></div>
           <div class="proj-body">
             <div class="proj-head">
@@ -390,13 +411,12 @@ async function loadProjects() {
             </div>
           </div>
         </a>`;
-    }).join('') + (SB.isLoggedIn() ? `
+    }).join('') + (isAuth ? `
       <button class="proj-add-card" onclick="openProjModal()">
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>
         <span>新建项目</span>
       </button>` : '');
 
-    // Stats
     const galleryPosts = await SB.getPosts({ type:'gallery', noProject:true });
     document.getElementById('heroStats').innerHTML = `
       <div class="stat"><div class="n">${galleryPosts.length}</div><div class="l">作品</div></div>
@@ -405,15 +425,39 @@ async function loadProjects() {
   } catch(e) { grid.innerHTML = `<div style="color:#ff6060;font-size:13px">加载失败：${e.message}</div>`; }
 }
 
-// ── Post Modal ──
-function openPostModal(defaultType = 'gallery') {
+// ── Post Modal（新增 & 编辑复用）──
+function openPostModal(defaultType='gallery') {
   if (!SB.isLoggedIn()) { openModal('loginModal'); return; }
+  _editingPostId = null;
   postUp.reset(document.getElementById('ptPreviews'));
-  ['ptTitle','ptContent','ptTags'].forEach(id => document.getElementById(id).value = '');
+  ['ptTitle','ptContent','ptTags'].forEach(id => document.getElementById(id).value='');
   document.getElementById('ptType').value = defaultType;
+  document.getElementById('ptImgWrap').style.display = 'block';
+  document.getElementById('postModalTitle').textContent = '发布内容';
+  document.getElementById('ptSubmit').textContent = '发布';
   onTypeChange();
   openModal('postModal');
 }
+
+function editPost(e, id) {
+  e.preventDefault(); e.stopPropagation();
+  if (!SB.isLoggedIn()) return;
+  const p = _postMap.get(id);
+  if (!p) return;
+  _editingPostId = id;
+  postUp.reset(document.getElementById('ptPreviews'));
+  document.getElementById('postModalTitle').textContent = '编辑内容';
+  document.getElementById('ptSubmit').textContent = '保存';
+  document.getElementById('ptType').value = p.type;
+  document.getElementById('ptTitle').value = p.title || '';
+  document.getElementById('ptContent').value = p.content || '';
+  document.getElementById('ptTags').value = (p.tags||[]).join(', ');
+  // 图片上传区隐藏（编辑时不强制重新上传图片）
+  document.getElementById('ptImgWrap').style.display = 'none';
+  onTypeChange();
+  openModal('postModal');
+}
+
 function onTypeChange() {
   const isUpdate = document.getElementById('ptType').value === 'update';
   hidden('ptProjWrap', !isUpdate);
@@ -424,93 +468,102 @@ function onTypeChange() {
   }
 }
 function onProjChange() {
-  const projId = document.getElementById('ptProj').value;
-  const proj = _projects.find(p=>p.id===projId);
+  const proj = _projects.find(p=>p.id===document.getElementById('ptProj').value);
   document.getElementById('ptSp').innerHTML = '<option value="">— 不归属子项目 —</option>' +
     ((proj?.sub_projects||[]).map(s=>`<option value="${s.id}">${s.name}</option>`).join(''));
 }
+
 async function submitPost() {
   const btn = document.getElementById('ptSubmit');
-  btn.textContent = '上传图片…'; btn.disabled = true;
+  btn.disabled = true;
   try {
-    const files = postUp.getFiles();
-    let urls = [];
-    if (files.length) {
-      btn.textContent = `上传图片 (0/${files.length})…`;
-      urls = await uploadImages(files);
-      btn.textContent = '保存中…';
+    const title   = document.getElementById('ptTitle').value.trim();
+    const content = document.getElementById('ptContent').value.trim();
+    const tags    = document.getElementById('ptTags').value.split(/[,，]/).map(t=>t.trim()).filter(Boolean);
+    if (!title) { toast('请填写标题','err'); btn.disabled=false; return; }
+
+    if (_editingPostId) {
+      // 编辑模式：只更新文字字段
+      btn.textContent='保存中…';
+      await SB.updatePost(_editingPostId, { title, content, tags });
+      toast('已保存 ✓');
+    } else {
+      // 新建模式：上传图片
+      const files = postUp.getFiles();
+      let urls = [];
+      if (files.length) { btn.textContent='上传图片…'; urls = await uploadImages(files); }
+      btn.textContent='发布中…';
+      const type      = document.getElementById('ptType').value;
+      const projectId = type==='update' ? (document.getElementById('ptProj').value||null) : null;
+      const spId      = type==='update' ? (document.getElementById('ptSp').value||null)   : null;
+      await SB.addPost({ type, title, content, tags, projectId, subProjectId:spId, coverImage:urls[0]||null, images:urls });
+      toast('发布成功 ✓');
     }
-    const type      = document.getElementById('ptType').value;
-    const title     = document.getElementById('ptTitle').value.trim();
-    const content   = document.getElementById('ptContent').value.trim();
-    const tags      = document.getElementById('ptTags').value.split(/[,，]/).map(t=>t.trim()).filter(Boolean);
-    const projectId = type==='update' ? (document.getElementById('ptProj').value||null) : null;
-    const spId      = type==='update' ? (document.getElementById('ptSp').value||null)   : null;
-    if (!title) { toast('请填写标题','err'); btn.textContent='发布'; btn.disabled=false; return; }
-    await SB.addPost({ type, title, content, tags, projectId, subProjectId:spId, coverImage:urls[0]||null, images:urls });
     closeModal('postModal');
-    toast('发布成功 ✓');
     loadGallery(); loadProjects();
-  } catch(e) { toast('发布失败：'+e.message,'err'); }
-  btn.textContent = '发布'; btn.disabled = false;
+  } catch(e) { toast('操作失败：'+e.message,'err'); }
+  btn.textContent = _editingPostId ? '保存' : '发布';
+  btn.disabled = false;
 }
 
 // ── Delete Post ──
 async function deletePost(e, id) {
   e.preventDefault(); e.stopPropagation();
-  const ok = await confirm2('删除作品', '确定删除这条作品？此操作不可撤销。');
+  const ok = await confirm2('删除作品','确定删除这条作品？此操作不可撤销。');
   if (!ok) return;
   try { await SB.deletePost(id); toast('已删除'); loadGallery(); loadProjects(); }
   catch(e) { toast('删除失败','err'); }
 }
 
-// ── Lightbox ──
-function lbOpen(imgUrl, post) {
-  document.getElementById('lbImg').src = imgUrl;
-  document.body.style.overflow = 'hidden';
-  const hasInfo = post && post.title;
-  const info = document.getElementById('lbInfo');
-  info.style.display = hasInfo ? 'block' : 'none';
-  if (hasInfo) {
-    document.getElementById('lbTitle').textContent = post.title || '';
-    const textEl = document.getElementById('lbText');
-    if (post.content) { textEl.textContent = post.content; textEl.style.display='block'; }
-    else { textEl.style.display='none'; }
-    document.getElementById('lbTags').innerHTML = (post.tags||[]).map(t=>`<span class="tag">${t}</span>`).join('');
-  }
-  document.getElementById('lb').classList.add('open');
-}
-function lbClose() { document.getElementById('lb').classList.remove('open'); document.body.style.overflow=''; }
-function lbClickOutside(e) { if(e.target.id==='lb') lbClose(); }
-document.addEventListener('keydown', e => { if(e.key==='Escape') lbClose(); });
-
 // ── Project Modal ──
 function openProjModal() {
   pmUp.reset(document.getElementById('pmPreviews'));
-  ['pmName','pmDesc'].forEach(id => document.getElementById(id).value = '');
-  document.getElementById('pmStatus').value = 'active';
-  pmColor = PROJ_COLORS[0];
-  buildColorPicker('pmColors', pmColor, c => { pmColor=c; });
+  ['pmName','pmDesc'].forEach(id => document.getElementById(id).value='');
+  document.getElementById('pmStatus').value='active';
+  pmColor=PROJ_COLORS[0];
+  buildColorPicker('pmColors', pmColor, c=>{pmColor=c;});
   openModal('projModal');
 }
 async function submitProject() {
   const btn = document.getElementById('pmSubmit');
-  btn.textContent = '处理中…'; btn.disabled = true;
+  btn.textContent='处理中…'; btn.disabled=true;
   try {
     const files = pmUp.getFiles();
     let coverImage = null;
     if (files.length) coverImage = await uploadImage(files[0]);
-    const name   = document.getElementById('pmName').value.trim();
-    const desc   = document.getElementById('pmDesc').value.trim();
-    const status = document.getElementById('pmStatus').value;
+    const name=document.getElementById('pmName').value.trim();
+    const desc=document.getElementById('pmDesc').value.trim();
+    const status=document.getElementById('pmStatus').value;
     if (!name) { toast('请填写项目名称','err'); btn.textContent='创建'; btn.disabled=false; return; }
-    await SB.addProject({ name, description:desc, color:pmColor, status, cover_image:coverImage });
-    closeModal('projModal');
-    toast('项目已创建 ✓');
-    loadProjects();
+    await SB.addProject({name,description:desc,color:pmColor,status,cover_image:coverImage});
+    closeModal('projModal'); toast('项目已创建 ✓'); loadProjects();
   } catch(e) { toast('创建失败：'+e.message,'err'); }
-  btn.textContent = '创建'; btn.disabled = false;
+  btn.textContent='创建'; btn.disabled=false;
 }
+
+// ── Lightbox ──
+// 通过 id 查 Map，完全避免 JSON 在 HTML 属性里的转义问题
+function lbOpen(postId) {
+  const p = _postMap.get(postId);
+  if (!p) return;
+  const img = document.getElementById('lbImg');
+  img.src = p.cover_image || '';
+  // info
+  document.getElementById('lbTitle').textContent = p.title || '';
+  const textEl = document.getElementById('lbText');
+  textEl.textContent = p.content || '';
+  textEl.style.display = p.content ? 'block' : 'none';
+  document.getElementById('lbTags').innerHTML = (p.tags||[]).map(t=>`<span class="tag">${t}</span>`).join('');
+  document.getElementById('lbInfo').style.display = p.title ? 'block' : 'none';
+  document.getElementById('lb').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+function lbClose() {
+  document.getElementById('lb').classList.remove('open');
+  document.body.style.overflow = '';
+  document.getElementById('lbImg').src = '';
+}
+document.addEventListener('keydown', e => { if(e.key==='Escape') lbClose(); });
 
 // ── Init ──
 postUp.mount(document.getElementById('ptZone'), document.getElementById('ptImg'), document.getElementById('ptPreviews'));

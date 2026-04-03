@@ -107,6 +107,10 @@ const SB = (() => {
     async deletePost(id) {
       await req(`/rest/v1/posts?id=eq.${id}`, { method: 'DELETE' });
     },
+    async updatePost(id, data) {
+      const rows = await req(`/rest/v1/posts?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+      return rows[0];
+    },
   };
 })();
 

@@ -8,14 +8,15 @@
 <style>
 body{padding-top:60px}
 .proj-hero{position:relative;min-height:260px;display:flex;flex-direction:column;justify-content:flex-end;padding:2.5rem 2rem;overflow:hidden;border-bottom:1px solid var(--line)}
-.ph-bg{position:absolute;inset:0;z-index:0;background:var(--bg2);transition:background .3s}
+.ph-bg{position:absolute;inset:0;z-index:0;background:var(--bg2)}
 .ph-cover{position:absolute;inset:0;z-index:0;background-size:cover;background-position:center}
-.ph-grad{position:absolute;inset:0;z-index:1;background:linear-gradient(to top,rgba(8,8,8,.96) 0%,rgba(8,8,8,.55) 55%,rgba(8,8,8,.25) 100%)}
+.ph-grad{position:absolute;inset:0;z-index:1;background:linear-gradient(to top,rgba(8,8,8,.96) 0%,rgba(8,8,8,.55) 55%,rgba(8,8,8,.2) 100%)}
 .ph-content{position:relative;z-index:2;max-width:1280px;margin:0 auto;width:100%}
 .ph-label{font-size:11px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin-bottom:.75rem;display:flex;align-items:center;gap:8px}
 .ph-name{font-family:var(--fh);font-size:clamp(2rem,5vw,3.5rem);font-weight:800;letter-spacing:-1.5px;line-height:1.05;margin-bottom:.75rem}
 .ph-desc{font-size:14px;color:var(--mut2);max-width:560px;line-height:1.75;margin-bottom:1.25rem}
 .ph-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+
 .proj-layout{display:grid;grid-template-columns:260px 1fr;max-width:1280px;margin:0 auto;min-height:calc(100vh - 320px)}
 .sidebar{border-right:1px solid var(--line);padding:1.75rem 1.25rem;position:sticky;top:60px;height:calc(100vh - 60px);overflow-y:auto;display:flex;flex-direction:column}
 .sb-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem}
@@ -34,16 +35,39 @@ body{padding-top:60px}
 .sp-del:hover{background:rgba(255,60,60,.15);color:#ff6060}
 .sp-new-form{background:var(--bg3);border:1px solid var(--line2);border-radius:var(--r);padding:10px;display:flex;flex-direction:column;gap:8px;margin-top:8px}
 .sb-divider{height:1px;background:var(--line);margin:1rem 0}
-.sb-actions{display:flex;flex-direction:column;gap:6px;margin-top:auto;padding-top:1rem}
+.sb-actions{display:flex;flex-direction:column;gap:6px;padding-top:1rem;margin-top:auto}
+
 .proj-main{padding:2rem}
 .main-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:2rem;flex-wrap:wrap;gap:1rem}
 .active-name{font-family:var(--fh);font-size:1.5rem;font-weight:800;letter-spacing:-.5px;margin-bottom:4px}
 .active-desc{font-size:13px;color:var(--muted)}
 .empty-state{padding:4rem 2rem;text-align:center;color:var(--muted);border:1px dashed var(--line2);border-radius:var(--rl)}
 .empty-state p{margin-top:8px;font-size:13px}
-.auth-only{display:none}
-.is-auth .auth-only{display:flex}
-@media(max-width:768px){.proj-layout{grid-template-columns:1fr}.sidebar{position:static;height:auto;border-right:none;border-bottom:1px solid var(--line)}.sp-list{flex-direction:row;flex-wrap:wrap}.sp-item{flex:1;min-width:120px}}
+
+/* Auth visibility */
+.auth-only{display:none!important}
+body.is-auth .auth-only{display:flex!important}
+.auth-only-inline{display:none!important}
+body.is-auth .auth-only-inline{display:inline-flex!important}
+
+/* Timeline 图片：保持比例，限制最大高度 */
+.tl-images{display:grid;gap:3px;cursor:zoom-in}
+.tl-images img{width:100%;height:auto;display:block;max-height:480px;object-fit:contain;background:var(--bg3)}
+.tl-images.two{grid-template-columns:1fr 1fr}
+.tl-images.many{grid-template-columns:repeat(3,1fr)}
+.tl-images.many img{max-height:240px;object-fit:cover}
+
+/* 帖子操作按钮 */
+.tl-card{position:relative}
+.tl-card-actions{position:absolute;top:10px;right:10px;display:none;gap:6px;z-index:5}
+body.is-auth .tl-card:hover .tl-card-actions{display:flex}
+
+@media(max-width:768px){
+  .proj-layout{grid-template-columns:1fr}
+  .sidebar{position:static;height:auto;border-right:none;border-bottom:1px solid var(--line)}
+  .sp-list{flex-direction:row;flex-wrap:wrap}
+  .sp-item{flex:1;min-width:120px}
+}
 </style>
 </head>
 <body>
@@ -54,7 +78,7 @@ body{padding-top:60px}
     返回主页
   </a>
   <div style="font-family:var(--fh);font-size:14px;font-weight:700;color:var(--muted)" id="navTitle"></div>
-  <button class="btn btn-acc btn-sm auth-only" id="navPostBtn" onclick="openPostModal()">+ 发布进展</button>
+  <button class="btn btn-acc btn-sm auth-only" onclick="openPostModal()">+ 发布进展</button>
 </nav>
 
 <div class="proj-hero">
@@ -95,9 +119,9 @@ body{padding-top:60px}
     </button>
     <div class="sp-list" id="spList"></div>
     <div class="sb-divider"></div>
-    <div class="sb-actions auth-only" style="display:none" id="sbActions">
+    <div class="sb-actions auth-only">
       <button class="btn btn-ghost btn-sm" onclick="openEditProj()" style="justify-content:flex-start">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4z"/></svg>
         编辑项目信息
       </button>
       <button class="btn btn-danger btn-sm" onclick="deleteThisProject()" style="justify-content:flex-start">
@@ -106,6 +130,7 @@ body{padding-top:60px}
       </button>
     </div>
   </aside>
+
   <main class="proj-main">
     <div class="main-head">
       <div><div class="active-name" id="activeName"></div><div class="active-desc" id="activeDesc"></div></div>
@@ -120,18 +145,23 @@ body{padding-top:60px}
   <a href="index.html" style="font-size:12px;color:var(--muted)">← 返回主页</a>
 </footer>
 
-<!-- Post Modal -->
+<!-- Post Modal（发布 & 编辑复用）-->
 <div class="modal-overlay" id="postModal">
   <div class="modal">
-    <div class="modal-head"><span class="modal-title">发布项目进展</span><button class="modal-close" onclick="closeModal('postModal')">✕</button></div>
-    <div class="fg"><label class="fl">归属子项目（可选）</label><select class="fs" id="ptSp"><option value="">— 记录到整个项目 —</option></select></div>
+    <div class="modal-head">
+      <span class="modal-title" id="postModalTitle">发布项目进展</span>
+      <button class="modal-close" onclick="closeModal('postModal')">✕</button>
+    </div>
+    <div class="fg"><label class="fl">归属子项目（可选）</label>
+      <select class="fs" id="ptSp"><option value="">— 记录到整个项目 —</option></select>
+    </div>
     <div class="fg"><label class="fl">标题</label><input class="fi" id="ptTitle" placeholder="今天的进展…" /></div>
     <div class="fg"><label class="fl">内容</label><textarea class="ft" id="ptContent" placeholder="描述今天的工作、突破或想法…"></textarea></div>
-    <div class="fg">
+    <div class="fg" id="ptImgWrap">
       <label class="fl">图片</label>
       <div class="upload-zone" id="ptZone">
         <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--muted);margin:0 auto"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
-        <p>点击或拖拽图片上传</p>
+        <p>点击或拖拽图片上传（可多张）</p>
         <input type="file" id="ptImg" multiple accept="image/*" style="display:none" />
       </div>
       <div class="upload-previews" id="ptPreviews"></div>
@@ -168,6 +198,23 @@ body{padding-top:60px}
   </div>
 </div>
 
+<!-- Lightbox -->
+<div class="lb" id="lb">
+  <div class="lb-backdrop" onclick="lbClose()"></div>
+  <div class="lb-inner">
+    <button class="lb-close" onclick="lbClose()">✕</button>
+    <button class="lb-nav lb-prev" id="lbPrev" onclick="lbStep(-1)">‹</button>
+    <button class="lb-nav lb-next" id="lbNext" onclick="lbStep(1)">›</button>
+    <div class="lb-img-wrap"><img id="lbImg" src="" alt="" /></div>
+    <div class="lb-strip" id="lbStrip"></div>
+    <div class="lb-info" id="lbInfo">
+      <div class="lb-title" id="lbTitle"></div>
+      <p class="lb-text" id="lbText"></p>
+      <div class="lb-tags" id="lbTags"></div>
+    </div>
+  </div>
+</div>
+
 <!-- Confirm -->
 <div class="confirm-overlay" id="confirmOverlay">
   <div class="confirm-box">
@@ -180,55 +227,38 @@ body{padding-top:60px}
   </div>
 </div>
 
-<!-- Lightbox -->
-<div class="lb" id="lb" onclick="lbClickOutside(event)">
-  <div class="lb-inner" id="lbInner">
-    <button class="lb-close" onclick="lbClose()">✕</button>
-    <button class="lb-nav lb-prev hidden" id="lbPrev" onclick="lbStep(-1)">‹</button>
-    <button class="lb-nav lb-next hidden" id="lbNext" onclick="lbStep(1)">›</button>
-    <div class="lb-img-wrap"><img id="lbImg" src="" alt="" /></div>
-    <div class="lb-strip" id="lbStrip"></div>
-    <div class="lb-info" id="lbInfo" style="display:none">
-      <div class="lb-title" id="lbTitle"></div>
-      <p class="lb-text" id="lbText" style="display:none"></p>
-      <div class="lb-tags" id="lbTags"></div>
-    </div>
-  </div>
-</div>
-
 <script src="app.js"></script>
 <script>
-const params  = new URLSearchParams(location.search);
-const projId  = params.get('id');
-let proj      = null;
-let activeSpId= '__all__';
-let emColor   = '#7b61ff';
-let allPosts  = [];
-const postUp  = makeUploader();
-const emUp    = makeUploader();
+const params   = new URLSearchParams(location.search);
+const projId   = params.get('id');
+let proj       = null;
+let activeSpId = '__all__';
+let allPosts   = [];
+let emColor    = '#7b61ff';
+let _editingPostId = null;
+// 用 Map 存帖子，供灯箱按 id 查找，避免 JSON 在属性里的转义问题
+let _postMap   = new Map();
+const postUp   = makeUploader();
+const emUp     = makeUploader();
 
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 function openModal(id)  { document.getElementById(id).classList.add('open'); }
 ['postModal','editModal'].forEach(id =>
-  document.getElementById(id).addEventListener('click', e => { if(e.target.id===id) closeModal(id); })
+  document.getElementById(id).addEventListener('click', e => { if(e.target===document.getElementById(id)) closeModal(id); })
 );
 initConfirm();
 
 function updateAuthUI() {
-  const ok = SB.isLoggedIn();
-  document.body.classList.toggle('is-auth', ok);
-  document.getElementById('navPostBtn').style.display = ok ? 'inline-flex' : 'none';
-  document.getElementById('sbActions').style.display  = ok ? 'flex' : 'none';
-  document.querySelectorAll('.auth-only').forEach(el => el.style.display = ok ? 'flex' : 'none');
+  document.body.classList.toggle('is-auth', SB.isLoggedIn());
 }
 
 async function init() {
   if (!projId) { location.href='index.html'; return; }
   updateAuthUI();
-  await loadProject();
-  await loadPosts();
   postUp.mount(document.getElementById('ptZone'), document.getElementById('ptImg'), document.getElementById('ptPreviews'));
   emUp.mount(document.getElementById('emZone'), document.getElementById('emImg'), document.getElementById('emPreviews'));
+  await loadProject();
+  await loadPosts();
 }
 
 async function loadProject() {
@@ -236,16 +266,16 @@ async function loadProject() {
     proj = await SB.getProject(projId);
     if (!proj) { document.body.innerHTML='<div style="padding:4rem;text-align:center;color:var(--muted)">项目未找到 <a href="index.html" style="color:var(--acc)">返回主页</a></div>'; return; }
     document.title = proj.name + ' · VOLTA';
-    renderHero();
-    renderSidebar();
+    renderHero(); renderSidebar();
   } catch(e) { toast('加载项目失败：'+e.message,'err'); }
 }
 
 async function loadPosts() {
   try {
-    allPosts = await SB.getPosts({ type:'update', projectId: projId });
-    renderSidebar();
-    renderTimeline();
+    allPosts = await SB.getPosts({ type:'update', projectId:projId });
+    _postMap.clear();
+    allPosts.forEach(p => _postMap.set(p.id, p));
+    renderSidebar(); renderTimeline();
   } catch(e) { toast('加载进展失败：'+e.message,'err'); }
 }
 
@@ -253,29 +283,27 @@ function renderHero() {
   document.getElementById('navTitle').textContent = proj.name;
   document.getElementById('phName').textContent   = proj.name;
   document.getElementById('phName').style.color   = proj.color;
-  document.getElementById('phDesc').textContent   = proj.description || '';
-  document.getElementById('phStatus').textContent = proj.status==='active' ? '进行中' : '已暂停';
-  document.getElementById('phSince').textContent  = '始于 ' + formatDate(proj.created_at);
+  document.getElementById('phDesc').textContent   = proj.description||'';
+  document.getElementById('phStatus').textContent = proj.status==='active'?'进行中':'已暂停';
+  document.getElementById('phSince').textContent  = '始于 '+formatDate(proj.created_at);
   document.getElementById('phBg').style.background= `radial-gradient(ellipse 60% 80% at 80% 50%,${proj.color}14 0%,var(--bg2) 70%)`;
-  const cover = document.getElementById('phCover');
-  cover.style.backgroundImage = proj.cover_image ? `url(${proj.cover_image})` : 'none';
+  document.getElementById('phCover').style.backgroundImage = proj.cover_image?`url(${proj.cover_image})`:'none';
 }
 
 function renderSidebar() {
   if (!proj) return;
-  const sps = proj.sub_projects || [];
-  const allCnt = allPosts.length;
-  const spAllBtn = document.getElementById('spAllBtn');
-  spAllBtn.classList.toggle('active', activeSpId==='__all__');
+  const sps    = proj.sub_projects||[];
+  const isAuth = SB.isLoggedIn();
+  document.getElementById('spAllBtn').classList.toggle('active', activeSpId==='__all__');
   document.getElementById('spAllDot').style.background = proj.color;
-  document.getElementById('spAllCnt').textContent = allCnt;
+  document.getElementById('spAllCnt').textContent = allPosts.length;
   document.getElementById('spList').innerHTML = sps.map(sp => {
     const cnt = allPosts.filter(p=>p.sub_project_id===sp.id).length;
     return `
       <button class="sp-item ${activeSpId===sp.id?'active':''}" onclick="setActiveSp('${sp.id}')">
         <span class="sp-dot" style="background:${proj.color}99"></span>
         <span class="sp-info"><span class="sp-name">${sp.name}</span><span class="sp-cnt">${cnt} 条</span></span>
-        ${SB.isLoggedIn()?`<span class="sp-del" onclick="deleteSp(event,'${sp.id}')" title="删除">
+        ${isAuth?`<span class="sp-del" onclick="deleteSp(event,'${sp.id}')" title="删除子项目">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
         </span>`:''}
       </button>`;
@@ -286,51 +314,63 @@ function setActiveSp(id) { activeSpId=id; renderSidebar(); renderTimeline(); }
 
 function renderTimeline() {
   if (!proj) return;
-  const sps = proj.sub_projects || [];
+  const sps    = proj.sub_projects||[];
+  const isAuth = SB.isLoggedIn();
   let posts;
   if (activeSpId==='__all__') {
-    document.getElementById('activeName').textContent = '全部进展';
-    document.getElementById('activeName').style.color = proj.color;
-    document.getElementById('activeDesc').textContent = '显示该项目下所有进展记录';
+    document.getElementById('activeName').textContent='全部进展';
+    document.getElementById('activeName').style.color=proj.color;
+    document.getElementById('activeDesc').textContent='显示该项目下所有进展记录';
     posts = allPosts;
   } else {
     const sp = sps.find(s=>s.id===activeSpId);
-    document.getElementById('activeName').textContent = sp?.name || '';
-    document.getElementById('activeName').style.color = proj.color;
-    document.getElementById('activeDesc').textContent = sp?.description || '';
+    document.getElementById('activeName').textContent=sp?.name||'';
+    document.getElementById('activeName').style.color=proj.color;
+    document.getElementById('activeDesc').textContent=sp?.description||'';
     posts = allPosts.filter(p=>p.sub_project_id===activeSpId);
   }
   const tl = document.getElementById('timeline');
   if (!posts.length) {
-    tl.innerHTML=`<div class="empty-state"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" style="margin:0 auto;opacity:.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg><p>还没有进展记录，点击「发布进展」开始记录</p></div>`;
+    tl.innerHTML=`<div class="empty-state">
+      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" style="margin:0 auto;opacity:.2">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>
+      </svg>
+      <p>还没有进展记录，点击「发布进展」开始记录</p>
+    </div>`;
     return;
   }
   tl.innerHTML = posts.map((p,i) => {
-    const sp = sps.find(s=>s.id===p.sub_project_id);
-    const imgs = Array.isArray(p.images) && p.images.length ? p.images : (p.cover_image ? [p.cover_image] : []);
-    // 图片块：自然比例，点击打开灯箱
+    const sp   = sps.find(s=>s.id===p.sub_project_id);
+    const imgs = Array.isArray(p.images)&&p.images.length ? p.images : (p.cover_image?[p.cover_image]:[]);
+    // 图片块：保持原比例，限制最大高度，点击打开灯箱
     let imgBlock = '';
-    if (imgs.length === 1) {
-      imgBlock = `<div class="tl-images one"><img src="${imgs[0]}" loading="lazy" onclick="lbOpen(${JSON.stringify(imgs)},0,${JSON.stringify(p)})" /></div>`;
-    } else if (imgs.length === 2) {
-      imgBlock = `<div class="tl-images two">${imgs.map((u,idx)=>`<img src="${u}" loading="lazy" onclick="lbOpen(${JSON.stringify(imgs)},${idx},${JSON.stringify(p)})" />`).join('')}</div>`;
-    } else if (imgs.length >= 3) {
-      imgBlock = `<div class="tl-images many">${imgs.slice(0,6).map((u,idx)=>`<img src="${u}" loading="lazy" onclick="lbOpen(${JSON.stringify(imgs)},${idx},${JSON.stringify(p)})" />`).join('')}</div>`;
+    if (imgs.length===1) {
+      imgBlock = `<div class="tl-images one" onclick="lbOpen('${p.id}',0)"><img src="${imgs[0]}" loading="lazy" /></div>`;
+    } else if (imgs.length===2) {
+      imgBlock = `<div class="tl-images two">${imgs.map((u,idx)=>`<img src="${u}" loading="lazy" onclick="lbOpen('${p.id}',${idx})" />`).join('')}</div>`;
+    } else if (imgs.length>=3) {
+      imgBlock = `<div class="tl-images many">${imgs.slice(0,6).map((u,idx)=>`<img src="${u}" loading="lazy" onclick="lbOpen('${p.id}',${idx})" />`).join('')}</div>`;
     }
-    const isAuth = SB.isLoggedIn();
+    // 管理操作按钮：只在 isAuth 时渲染到 DOM，CSS 控制显隐
+    const actions = isAuth ? `
+      <div class="tl-card-actions">
+        <button class="btn btn-ghost btn-sm btn-icon" onclick="editPost(event,'${p.id}')" title="编辑">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4z"/></svg>
+        </button>
+        <button class="btn btn-danger btn-sm btn-icon" onclick="deletePost(event,'${p.id}')" title="删除">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+        </button>
+      </div>` : '';
     return `
       <div class="tl-entry" style="animation-delay:${i*.05}s">
         <div class="tl-dot" style="border-color:${proj.color}55"></div>
         <div class="tl-date">${formatDate(p.created_at)}${sp?` · <span style="color:${proj.color}99">${sp.name}</span>`:''}</div>
         <div class="tl-card card">
-          ${isAuth ? `<div class="card-actions">
-            <button class="btn btn-danger btn-sm btn-icon" onclick="deletePost(event,'${p.id}')" title="删除">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
-            </button>
-          </div>` : ''}
+          ${actions}
           ${imgBlock}
           <div class="tl-body">
-            <div class="tl-title" onclick="lbOpen(${JSON.stringify(imgs)},0,${JSON.stringify(p)})">${p.title}</div>
+            <div class="tl-title" style="cursor:${imgs.length?'zoom-in':'default'}" onclick="${imgs.length?`lbOpen('${p.id}',0)`:''}">${p.title}</div>
             ${p.content?`<p class="tl-text">${p.content}</p>`:''}
             ${(p.tags||[]).length?`<div class="tl-tags">${p.tags.map(t=>`<span class="tag">${t}</span>`).join('')}</div>`:''}
           </div>
@@ -339,7 +379,7 @@ function renderTimeline() {
   }).join('');
 }
 
-// ── New SubProject ──
+// ── SubProject ──
 function toggleNewSp() {
   const f=document.getElementById('newSpForm');
   f.classList.toggle('hidden');
@@ -350,18 +390,15 @@ async function submitNewSp() {
   const desc=document.getElementById('newSpDesc').value.trim();
   if(!name){toast('请填写子项目名称','err');return;}
   try {
-    await SB.addSubProject({ project_id:projId, name, description:desc });
+    await SB.addSubProject({project_id:projId,name,description:desc});
     document.getElementById('newSpName').value='';
     document.getElementById('newSpDesc').value='';
     toggleNewSp();
     toast('子项目已添加 ✓');
-    await loadProject();
-    renderSidebar();
+    await loadProject(); renderSidebar();
   } catch(e){toast('添加失败：'+e.message,'err');}
 }
-
-// ── Delete SubProject ──
-async function deleteSp(e, spId) {
+async function deleteSp(e,spId) {
   e.stopPropagation();
   const sp=(proj.sub_projects||[]).find(s=>s.id===spId);
   const cnt=allPosts.filter(p=>p.sub_project_id===spId).length;
@@ -371,51 +408,83 @@ async function deleteSp(e, spId) {
     await SB.deleteSubProject(spId);
     if(activeSpId===spId) activeSpId='__all__';
     toast('已删除');
-    await loadProject();
-    await loadPosts();
-  } catch(e){toast('删除失败','err');}
+    await loadProject(); await loadPosts();
+  }catch(e){toast('删除失败','err');}
 }
 
 // ── Delete Project ──
 async function deleteThisProject() {
   const ok=await confirm2('删除整个项目',`删除项目「${proj?.name}」及其所有内容？此操作不可撤销。`);
   if(!ok)return;
-  try { await SB.deleteProject(projId); location.href='index.html'; }
+  try{await SB.deleteProject(projId);location.href='index.html';}
   catch(e){toast('删除失败：'+e.message,'err');}
 }
 
-// ── Post Modal ──
+// ── Post Modal（发布 & 编辑）──
 function openPostModal() {
   if(!SB.isLoggedIn())return;
+  _editingPostId=null;
   postUp.reset(document.getElementById('ptPreviews'));
   ['ptTitle','ptContent','ptTags'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('postModalTitle').textContent='发布项目进展';
+  document.getElementById('ptSubmit').textContent='发布';
+  document.getElementById('ptImgWrap').style.display='block';
   const sps=proj?.sub_projects||[];
   document.getElementById('ptSp').innerHTML='<option value="">— 记录到整个项目 —</option>'+
     sps.map(s=>`<option value="${s.id}" ${s.id===activeSpId&&activeSpId!=='__all__'?'selected':''}>${s.name}</option>`).join('');
   openModal('postModal');
 }
+
+function editPost(e,id) {
+  e.stopPropagation();
+  if(!SB.isLoggedIn())return;
+  const p=_postMap.get(id);
+  if(!p)return;
+  _editingPostId=id;
+  document.getElementById('postModalTitle').textContent='编辑进展';
+  document.getElementById('ptSubmit').textContent='保存';
+  document.getElementById('ptTitle').value=p.title||'';
+  document.getElementById('ptContent').value=p.content||'';
+  document.getElementById('ptTags').value=(p.tags||[]).join(', ');
+  // 编辑时不重新上传图片
+  document.getElementById('ptImgWrap').style.display='none';
+  postUp.reset(document.getElementById('ptPreviews'));
+  const sps=proj?.sub_projects||[];
+  document.getElementById('ptSp').innerHTML='<option value="">— 记录到整个项目 —</option>'+
+    sps.map(s=>`<option value="${s.id}" ${s.id===p.sub_project_id?'selected':''}>${s.name}</option>`).join('');
+  openModal('postModal');
+}
+
 async function submitPost() {
   const btn=document.getElementById('ptSubmit');
-  btn.textContent='上传图片…';btn.disabled=true;
+  btn.disabled=true;
   try {
-    const files=postUp.getFiles();
-    let urls=[];
-    if(files.length){urls=await uploadImages(files);btn.textContent='保存中…';}
-    const title   =document.getElementById('ptTitle').value.trim();
-    const content =document.getElementById('ptContent').value.trim();
-    const tags    =document.getElementById('ptTags').value.split(/[,，]/).map(t=>t.trim()).filter(Boolean);
-    const spId    =document.getElementById('ptSp').value||null;
-    if(!title){toast('请填写标题','err');btn.textContent='发布';btn.disabled=false;return;}
-    await SB.addPost({type:'update',title,content,tags,projectId:projId,subProjectId:spId,coverImage:urls[0]||null,images:urls});
+    const title  =document.getElementById('ptTitle').value.trim();
+    const content=document.getElementById('ptContent').value.trim();
+    const tags   =document.getElementById('ptTags').value.split(/[,，]/).map(t=>t.trim()).filter(Boolean);
+    const spId   =document.getElementById('ptSp').value||null;
+    if(!title){toast('请填写标题','err');btn.disabled=false;return;}
+    if(_editingPostId) {
+      btn.textContent='保存中…';
+      await SB.updatePost(_editingPostId,{title,content,tags,sub_project_id:spId});
+      toast('已保存 ✓');
+    } else {
+      const files=postUp.getFiles();
+      let urls=[];
+      if(files.length){btn.textContent='上传图片…';urls=await uploadImages(files);}
+      btn.textContent='发布中…';
+      await SB.addPost({type:'update',title,content,tags,projectId:projId,subProjectId:spId,coverImage:urls[0]||null,images:urls});
+      toast('发布成功 ✓');
+    }
     closeModal('postModal');
-    toast('发布成功 ✓');
     await loadPosts();
-  }catch(e){toast('发布失败：'+e.message,'err');}
-  btn.textContent='发布';btn.disabled=false;
+  }catch(e){toast('操作失败：'+e.message,'err');}
+  btn.textContent=_editingPostId?'保存':'发布';
+  btn.disabled=false;
 }
 
 // ── Delete Post ──
-async function deletePost(e, id) {
+async function deletePost(e,id) {
   e.stopPropagation();
   const ok=await confirm2('删除记录','确定删除这条进展记录？此操作不可撤销。');
   if(!ok)return;
@@ -423,58 +492,13 @@ async function deletePost(e, id) {
   catch(e){toast('删除失败','err');}
 }
 
-// ── Lightbox ──
-let _lbImgs = [], _lbIdx = 0;
-function lbOpen(imgs, idx, post) {
-  _lbImgs = imgs || [];
-  _lbIdx  = idx || 0;
-  document.getElementById('lb').classList.add('open');
-  document.body.style.overflow = 'hidden';
-  // info
-  const hasInfo = post && (post.title || post.content);
-  const info = document.getElementById('lbInfo');
-  info.style.display = hasInfo ? 'block' : 'none';
-  if (hasInfo) {
-    document.getElementById('lbTitle').textContent = post.title || '';
-    const textEl = document.getElementById('lbText');
-    if (post.content) { textEl.textContent = post.content; textEl.style.display='block'; }
-    else { textEl.style.display='none'; }
-    document.getElementById('lbTags').innerHTML = (post.tags||[]).map(t=>`<span class="tag">${t}</span>`).join('');
-  }
-  lbRender();
-}
-function lbRender() {
-  document.getElementById('lbImg').src = _lbImgs[_lbIdx] || '';
-  // strip
-  const strip = document.getElementById('lbStrip');
-  if (_lbImgs.length <= 1) { strip.style.display='none'; }
-  else {
-    strip.style.display='flex';
-    strip.innerHTML = _lbImgs.map((u,i)=>
-      `<img src="${u}" class="${i===_lbIdx?'active':''}" onclick="lbGo(${i})" />`
-    ).join('');
-  }
-  document.getElementById('lbPrev').classList.toggle('hidden', _lbIdx===0);
-  document.getElementById('lbNext').classList.toggle('hidden', _lbIdx===_lbImgs.length-1);
-}
-function lbGo(idx) { _lbIdx=idx; lbRender(); }
-function lbStep(d) { _lbIdx=Math.max(0,Math.min(_lbImgs.length-1,_lbIdx+d)); lbRender(); }
-function lbClose() { document.getElementById('lb').classList.remove('open'); document.body.style.overflow=''; }
-function lbClickOutside(e) { if(e.target.id==='lb') lbClose(); }
-document.addEventListener('keydown', e => {
-  if (!document.getElementById('lb').classList.contains('open')) return;
-  if (e.key==='Escape') lbClose();
-  if (e.key==='ArrowLeft')  lbStep(-1);
-  if (e.key==='ArrowRight') lbStep(1);
-});
-
-init();
+// ── Edit Project ──
 function openEditProj() {
   if(!proj)return;
   emColor=proj.color;
   emUp.reset(document.getElementById('emPreviews'));
-  document.getElementById('emName').value  =proj.name;
-  document.getElementById('emDesc').value  =proj.description||'';
+  document.getElementById('emName').value=proj.name;
+  document.getElementById('emDesc').value=proj.description||'';
   document.getElementById('emStatus').value=proj.status;
   if(proj.cover_image){
     const item=document.createElement('div');
@@ -490,18 +514,69 @@ async function submitEditProj() {
   btn.textContent='保存中…';btn.disabled=true;
   try {
     const files=emUp.getFiles();
-    const coverImage=files.length ? await uploadImage(files[0]) : proj.cover_image;
+    const coverImage=files.length?await uploadImage(files[0]):proj.cover_image;
     const name  =document.getElementById('emName').value.trim();
     const desc  =document.getElementById('emDesc').value.trim();
     const status=document.getElementById('emStatus').value;
     if(!name){toast('请填写项目名称','err');btn.textContent='保存';btn.disabled=false;return;}
     await SB.updateProject(projId,{name,description:desc,status,color:emColor,cover_image:coverImage});
-    closeModal('editModal');
-    toast('已保存 ✓');
-    await loadProject();
-    renderTimeline();
+    closeModal('editModal');toast('已保存 ✓');
+    await loadProject();renderTimeline();
   }catch(e){toast('保存失败：'+e.message,'err');}
   btn.textContent='保存';btn.disabled=false;
+}
+
+// ── Lightbox ──
+let _lbImgs=[], _lbIdx=0;
+function lbOpen(postId, idx) {
+  const p=_postMap.get(postId);
+  if(!p)return;
+  _lbImgs = Array.isArray(p.images)&&p.images.length ? p.images : (p.cover_image?[p.cover_image]:[]);
+  if(!_lbImgs.length)return;
+  _lbIdx = idx||0;
+  // info
+  document.getElementById('lbTitle').textContent=p.title||'';
+  const textEl=document.getElementById('lbText');
+  textEl.textContent=p.content||'';
+  textEl.style.display=p.content?'block':'none';
+  document.getElementById('lbTags').innerHTML=(p.tags||[]).map(t=>`<span class="tag">${t}</span>`).join('');
+  document.getElementById('lbInfo').style.display=p.title?'block':'none';
+  document.getElementById('lb').classList.add('open');
+  document.body.style.overflow='hidden';
+  lbRender();
+}
+function lbRender() {
+  document.getElementById('lbImg').src=_lbImgs[_lbIdx]||'';
+  const strip=document.getElementById('lbStrip');
+  if(_lbImgs.length<=1){strip.style.display='none';}
+  else{
+    strip.style.display='flex';
+    strip.innerHTML=_lbImgs.map((u,i)=>`<img src="${u}" class="${i===_lbIdx?'active':''}" onclick="lbGo(${i})" />`).join('');
+  }
+  document.getElementById('lbPrev').style.display=_lbIdx===0?'none':'flex';
+  document.getElementById('lbNext').style.display=_lbIdx===_lbImgs.length-1?'none':'flex';
+}
+function lbGo(idx){_lbIdx=idx;lbRender();}
+function lbStep(d){_lbIdx=Math.max(0,Math.min(_lbImgs.length-1,_lbIdx+d));lbRender();}
+function lbClose(){document.getElementById('lb').classList.remove('open');document.body.style.overflow='';document.getElementById('lbImg').src='';}
+document.getElementById('lb').querySelector('.lb-backdrop').addEventListener('click',lbClose);
+document.addEventListener('keydown',e=>{
+  if(!document.getElementById('lb').classList.contains('open'))return;
+  if(e.key==='Escape')lbClose();
+  if(e.key==='ArrowLeft')lbStep(-1);
+  if(e.key==='ArrowRight')lbStep(1);
+});
+
+// ── 同时在 app.js 里补上 updatePost 方法（如果没有的话在这里直接定义）──
+if(!SB.updatePost){
+  SB.updatePost=async function(id,data){
+    const rows=await fetch(CONFIG.supabase.url+`/rest/v1/posts?id=eq.${id}`,{
+      method:'PATCH',
+      headers:{'apikey':CONFIG.supabase.key,'Content-Type':'application/json','Prefer':'return=representation'},
+      body:JSON.stringify(data)
+    }).then(r=>r.json());
+    return rows[0];
+  };
 }
 
 init();
