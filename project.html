@@ -261,10 +261,7 @@ function renderTimeline(){
   tl.innerHTML=posts.map((p,i)=>{
     const sp=sps.find(s=>s.id===p.sub_project_id);
     const imgs=Array.isArray(p.images)&&p.images.length?p.images:[];
-    let imgBlock='';
-    if(imgs.length===1) imgBlock=`<div class="tl-images one" onclick="openLb('${p.id}',0)"><img src="${esc(imgs[0])}" loading="lazy" /></div>`;
-    else if(imgs.length===2) imgBlock=`<div class="tl-images two">${imgs.map((u,idx)=>`<img src="${esc(u)}" loading="lazy" onclick="openLb('${p.id}',${idx})" />`).join('')}</div>`;
-    else if(imgs.length>=3) imgBlock=`<div class="tl-images many">${imgs.slice(0,6).map((u,idx)=>`<img src="${esc(u)}" loading="lazy" onclick="openLb('${p.id}',${idx})" />`).join('')}</div>`;
+    const imgBlock=imgs.length?buildImgBlock(imgs,p.id):'';
     return `<div class="tl-entry" style="animation-delay:${i*.05}s">
       <div class="tl-dot" style="border-color:${proj.color}55"></div>
       <div class="tl-date">${formatDate(p.created_at)}${sp?` · <span style="color:${proj.color}99">${esc(sp.name)}</span>`:''}</div>
