@@ -326,20 +326,19 @@ window.pickColor = function(el, containerId, e) {
 };
 
 // ── 图片网格 HTML 生成器 ──────────────────────────────────────
-// imgs: string[]  — 图片 URL 数组
-// postId: string  — 用于 LB.open 的帖子 id（传 '' 则不绑定灯箱）
-// returns: html string
 function buildImgBlock(imgs, postId) {
   if (!imgs || !imgs.length) return '';
   const n = imgs.length;
   const lb = (idx) => postId ? `onclick="openLb('${postId}',${idx})"` : '';
 
+  // 1张
   if (n === 1) {
     return `<div class="tl-images n1">
       <img src="${esc(imgs[0])}" loading="lazy" ${lb(0)} />
     </div>`;
   }
 
+  // 2张：左右各半
   if (n === 2) {
     return `<div class="tl-images n2">
       <img src="${esc(imgs[0])}" loading="lazy" ${lb(0)} />
@@ -347,6 +346,7 @@ function buildImgBlock(imgs, postId) {
     </div>`;
   }
 
+  // 3张：左大（全高）+ 右上下两格
   if (n === 3) {
     return `<div class="tl-images n3">
       <img src="${esc(imgs[0])}" loading="lazy" ${lb(0)} />
@@ -355,31 +355,26 @@ function buildImgBlock(imgs, postId) {
     </div>`;
   }
 
+  // 4张：2×2 网格
   if (n === 4) {
     return `<div class="tl-images n4">
       <img src="${esc(imgs[0])}" loading="lazy" ${lb(0)} />
-      <div class="right-col">
-        <img src="${esc(imgs[1])}" loading="lazy" ${lb(1)} />
-        <img src="${esc(imgs[2])}" loading="lazy" ${lb(2)} />
-        <img src="${esc(imgs[3])}" loading="lazy" ${lb(3)} />
-      </div>
+      <img src="${esc(imgs[1])}" loading="lazy" ${lb(1)} />
+      <img src="${esc(imgs[2])}" loading="lazy" ${lb(2)} />
+      <img src="${esc(imgs[3])}" loading="lazy" ${lb(3)} />
     </div>`;
   }
 
-  // 5张及以上：显示前3张，最后一格叠加剩余数量
+  // 5张及以上：左大（全高）+ 右上下两格，右下叠加剩余计数
   const extra = n - 3;
   return `<div class="tl-images n5plus">
-    <div class="main-img">
-      <img src="${esc(imgs[0])}" loading="lazy" ${lb(0)} />
+    <img src="${esc(imgs[0])}" loading="lazy" ${lb(0)} />
+    <div class="img-slot" ${lb(1)}>
+      <img src="${esc(imgs[1])}" loading="lazy" />
     </div>
-    <div class="right-col">
-      <div class="img-slot" ${lb(1)}>
-        <img src="${esc(imgs[1])}" loading="lazy" />
-      </div>
-      <div class="img-slot" style="cursor:zoom-in" ${lb(2)}>
-        <img src="${esc(imgs[2])}" loading="lazy" />
-        ${extra > 0 ? `<div class="more-badge">+${extra}</div>` : ''}
-      </div>
+    <div class="img-slot" ${lb(2)}>
+      <img src="${esc(imgs[2])}" loading="lazy" />
+      ${extra > 0 ? `<div class="more-badge">+${extra}</div>` : ''}
     </div>
   </div>`;
 }
