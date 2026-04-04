@@ -157,10 +157,42 @@ const SB = (() => {
   };
 })();
 
+// ── 上传前压缩（Canvas，浏览器端）────────────────────────────
+function compressImage(file, maxW = 2000, maxH = 2000, quality = 0.82) {
+  return new Promise(resolve => {
+    // 小于 300KB 或非图片，直接跳过
+    if (!file.type.startsWith('image/') || file.size < 300 * 1024) {
+      resolve(file); return;
+    }
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width: w, height: h } = img;
+      if (w > maxW || h > maxH) {
+        const r = Math.min(maxW / w, maxH / h);
+        w = Math.round(w * r); h = Math.round(h * r);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      canvas.toBlob(blob => {
+        // 压缩后反而更大则用原文件（某些 PNG）
+        resolve(blob && blob.size < file.size
+          ? new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' })
+          : file);
+      }, 'image/jpeg', quality);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
+
 // ── Cloudinary ────────────────────────────────────────────────
 async function uploadImage(file) {
+  const compressed = await compressImage(file);
   const fd = new FormData();
-  fd.append('file', file);
+  fd.append('file', compressed);
   fd.append('upload_preset', CONFIG.cloudinary.uploadPreset);
   const res = await fetch(
     `https://api.cloudinary.com/v1_1/${CONFIG.cloudinary.cloudName}/image/upload`,
