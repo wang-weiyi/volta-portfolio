@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>文章 · VOLTA</title>
+<link rel="stylesheet" href="style.css">
+<style>
+body{padding-top:60px}
+.page-hero{padding:4rem 2rem 3rem;border-bottom:1px solid var(--line);background:var(--bg2)}
+.page-hero-inner{max-width:1280px;margin:0 auto;display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:1.5rem}
+.featured{max-width:1280px;margin:0 auto;padding:3rem 2rem 1rem}
+.featured-label{font-size:11px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--acc);display:flex;align-items:center;gap:8px;margin-bottom:1.5rem}
+.featured-label::before{content:'';width:18px;height:1px;background:currentColor}
+.featured-card{display:grid;grid-template-columns:1fr 1fr;gap:0;border-radius:var(--rl);overflow:hidden;border:1px solid var(--line);text-decoration:none;color:inherit;transition:border-color .22s,transform .22s}
+.featured-card:hover{border-color:var(--line2);transform:translateY(-2px)}
+.featured-img{aspect-ratio:16/9;overflow:hidden;background:var(--bg3)}
+.featured-img img{width:100%;height:100%;object-fit:cover}
+.featured-img-ph{width:100%;height:100%;display:flex;align-items:center;justify-content:center}
+.featured-img-ph svg{opacity:.08}
+.featured-body{background:var(--bg2);padding:2rem;display:flex;flex-direction:column;justify-content:flex-end;gap:1rem}
+.featured-title{font-family:var(--fh);font-size:clamp(1.4rem,2.5vw,2rem);font-weight:800;letter-spacing:-1px;line-height:1.15}
+.featured-excerpt{font-size:14px;color:var(--muted);line-height:1.75}
+.featured-meta{font-size:11px;color:var(--muted);display:flex;gap:12px}
+.article-grid{max-width:1280px;margin:0 auto;padding:2rem;display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:18px}
+/* Auth article actions */
+.art-card{position:relative}
+.art-card-actions{position:absolute;top:8px;right:8px;display:none;gap:6px;z-index:3}
+body.is-auth .art-card:hover .art-card-actions{display:flex}
+@media(max-width:700px){.featured-card{grid-template-columns:1fr}.featured-img{aspect-ratio:16/9}}
+</style>
+</head>
+<body>
+<nav class="nav">
+  <a href="index.html" class="nav-logo">VOLTA<span class="dot">.</span></a>
+  <div class="nav-links">
+    <a href="index.html">主页</a>
+    <a href="articles.html" class="active">文章</a>
+    <a href="posts.html">帖子中心</a>
+  </div>
+  <div style="display:flex;align-items:center;gap:10px">
+    <button class="btn btn-acc btn-sm auth-only" onclick="newArticle()">+ 写文章</button>
+    <button class="nav-login-btn" id="authBtn" onclick="onAuthClick()">登录</button>
+  </div>
+</nav>
+
+<div class="page-hero">
+  <div class="page-hero-inner">
+    <div>
+      <div class="sh-label">写作</div>
+      <h1 style="font-family:var(--fh);font-size:clamp(2rem,4vw,3rem);font-weight:800;letter-spacing:-1.5px">文章与思考</h1>
+    </div>
+    <p style="font-size:14px;color:var(--muted);max-width:380px;line-height:1.8">关于 3D 创作、工具探索、美学实验和世界构建的长篇思考。</p>
+  </div>
+</div>
+
+<div class="featured" id="featured" style="display:none"></div>
+<div class="article-grid" id="articleGrid">
+  <div class="skeleton" style="height:300px;border-radius:10px"></div>
+  <div class="skeleton" style="height:300px;border-radius:10px"></div>
+  <div class="skeleton" style="height:300px;border-radius:10px"></div>
+</div>
+
+<!-- Login Modal -->
+<div class="modal-overlay" id="loginModal">
+  <div class="modal" style="max-width:380px">
+    <div class="modal-head"><span class="modal-title">登录</span><button class="modal-close" onclick="closeModal('loginModal')">✕</button></div>
+    <div class="fg"><label class="fl">邮箱</label><input class="fi" id="loginEmail" type="email" /></div>
+    <div class="fg"><label class="fl">密码</label><input class="fi" id="loginPwd" type="password" /></div>
+    <div id="loginErr" style="font-size:13px;color:#ff6060;display:none;margin-bottom:.5rem"></div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('loginModal')">取消</button>
+      <button class="btn btn-acc btn-sm" id="loginBtn" onclick="doLogin()">登录</button>
+    </div>
+  </div>
+</div>
+
+<!-- Confirm -->
+<div class="confirm-overlay" id="confirmOverlay">
+  <div class="confirm-box">
+    <div class="confirm-title" id="cTitle"></div>
+    <p class="confirm-msg" id="cMsg"></p>
+    <div class="confirm-actions">
+      <button class="btn btn-ghost btn-sm" onclick="cResolve(false)">取消</button>
+      <button class="btn btn-danger btn-sm" onclick="cResolve(true)">删除</button>
+    </div>
+  </div>
+</div>
+
+<footer class="footer" style="margin-top:4rem">
+  <span class="footer-copy">© 2026 VOLTA Studio</span>
+  <nav class="footer-links"><a href="index.html">主页</a><a href="posts.html">帖子</a></nav>
+</footer>
+
+<script src="app.js"></script>
+<script>
+function closeModal(id){document.getElementById(id).classList.remove('open')}
+function openModal(id){document.getElementById(id).classList.add('open')}
+document.getElementById('loginModal').addEventListener('click',e=>{if(e.target.id==='loginModal')closeModal('loginModal')});
+initConfirm();
+applyAuthUI();
+document.getElementById('authBtn').textContent=SB.isLoggedIn()?'登出':'登录';
+
+function onAuthClick(){
+  if(SB.isLoggedIn()){SB.signOut();applyAuthUI();document.getElementById('authBtn').textContent='登录';toast('已登出');load();}
+  else openModal('loginModal');
+}
+async function doLogin(){
+  const btn=document.getElementById('loginBtn'),errEl=document.getElementById('loginErr');
+  const email=document.getElementById('loginEmail').value.trim(),pwd=document.getElementById('loginPwd').value;
+  errEl.style.display='none';
+  if(!email||!pwd){errEl.textContent='请填写邮箱和密码';errEl.style.display='block';return;}
+  btn.textContent='登录中…';btn.disabled=true;
+  try{await SB.signIn(email,pwd);closeModal('loginModal');applyAuthUI();document.getElementById('authBtn').textContent='登出';toast('登录成功 ✓');load();}
+  catch(e){errEl.textContent='邮箱或密码错误';errEl.style.display='block';}
+  btn.textContent='登录';btn.disabled=false;
+}
+document.getElementById('loginPwd').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
+
+function newArticle(){
+  // 创建草稿文章，跳转到编辑页
+  SB.addArticle({title:'新文章',blocks:[],status:'draft'}).then(art=>{
+    if(art) location.href=`article.html?id=${art.id}&edit=1`;
+  }).catch(e=>toast('创建失败：'+e.message,'err'));
+}
+
+function excerpt(blocks,len=120){
+  for(const b of blocks){
+    if(b.type==='paragraph'&&b.content){
+      return b.content.length>len?b.content.slice(0,len)+'…':b.content;
+    }
+  }
+  return '';
+}
+
+async function deleteArticle(id,e){
+  e.preventDefault();e.stopPropagation();
+  const ok=await confirm2('删除文章','确定删除这篇文章？此操作不可撤销。');
+  if(!ok)return;
+  try{await SB.deleteArticle(id);toast('已删除');load();}
+  catch(e){toast('删除失败','err');}
+}
+
+async function load(){
+  const isAuth=SB.isLoggedIn();
+  const grid=document.getElementById('articleGrid');
+  const featEl=document.getElementById('featured');
+  try{
+    const articles=await SB.getArticles(!isAuth);
+    if(!articles.length){
+      grid.innerHTML=`<div class="empty-state" style="grid-column:1/-1"><p>还没有发布文章${isAuth?'，点击「写文章」开始创作':''}</p></div>`;
+      featEl.style.display='none';return;
+    }
+    // Featured = first article
+    const [first,...rest]=articles;
+    const fImg=first.cover_image;
+    featEl.style.display='block';
+    featEl.innerHTML=`
+      <div class="featured-label">精选</div>
+      <a class="featured-card" href="article.html?id=${first.id}">
+        <div class="featured-img">${fImg?`<img src="${esc(fImg)}" loading="lazy">`:`<div class="featured-img-ph"><svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></div>`}</div>
+        <div class="featured-body">
+          ${isAuth?`<div style="display:flex;gap:6px;margin-bottom:.5rem">
+            <a href="article.html?id=${first.id}&edit=1" class="btn btn-ghost btn-sm" onclick="event.stopPropagation()">编辑</a>
+            <button class="btn btn-danger btn-sm" onclick="deleteArticle('${first.id}',event)">删除</button>
+          </div>`:''}
+          <div class="featured-meta"><span>${formatDate(first.created_at)}</span>${first.status==='draft'?'<span class="badge badge-draft">草稿</span>':''}</div>
+          <div class="featured-title">${esc(first.title)}</div>
+          <p class="featured-excerpt">${esc(excerpt(first.blocks||[]))}</p>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">${(first.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div>
+        </div>
+      </a>`;
+
+    grid.innerHTML=rest.map(a=>{
+      const ex=excerpt(a.blocks||[]);
+      const cover=a.cover_image;
+      return `<a class="art-card card" href="article.html?id=${a.id}" style="text-decoration:none;color:inherit;display:flex;flex-direction:column">
+        ${isAuth?`<div class="art-card-actions" onclick="event.preventDefault();event.stopPropagation()">
+          <a href="article.html?id=${a.id}&edit=1" class="btn btn-ghost btn-sm btn-icon" title="编辑">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4z"/></svg>
+          </a>
+          <button class="btn btn-danger btn-sm btn-icon" onclick="deleteArticle('${a.id}',event)" title="删除">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+          </button>
+        </div>`:''}
+        <div class="art-cover">${cover?`<img src="${esc(cover)}" loading="lazy">`:`<div class="art-cover-ph"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></div>`}</div>
+        <div class="art-body">
+          <div class="art-meta"><span>${formatDate(a.created_at)}</span>${a.status==='draft'?'<span class="badge badge-draft">草稿</span>':''}</div>
+          <div class="art-title">${esc(a.title)}</div>
+          ${ex?`<p class="art-excerpt">${esc(ex)}</p>`:''}
+          <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:auto;padding-top:.5rem">${(a.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div>
+        </div>
+      </a>`;
+    }).join('');
+  }catch(e){grid.innerHTML=`<div style="color:#ff6060;font-size:13px">加载失败：${e.message}</div>`;}
+}
+
+load();
+</script>
+</body>
+</html>

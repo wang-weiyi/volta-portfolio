@@ -1,14 +1,13 @@
 <!DOCTYPE html>
 <html lang="zh">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>VOLTA · 3D Artist Portfolio</title>
 <link rel="stylesheet" href="style.css">
 <style>
 .hero{min-height:100vh;display:flex;flex-direction:column;justify-content:flex-end;padding:2rem;padding-top:60px;position:relative;overflow:hidden}
-.hero-glow{position:absolute;inset:0;z-index:0;pointer-events:none;background:radial-gradient(ellipse 55% 55% at 75% 35%,rgba(123,97,255,.07) 0%,transparent 65%),radial-gradient(ellipse 40% 40% at 25% 75%,rgba(200,255,0,.04) 0%,transparent 60%)}
-.hero-grid{position:absolute;inset:0;z-index:0;pointer-events:none;background-image:linear-gradient(rgba(255,255,255,.032) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.032) 1px,transparent 1px);background-size:72px 72px;mask-image:radial-gradient(ellipse 90% 90% at 60% 40%,black 10%,transparent 75%)}
+.hero-glow{position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse 55% 55% at 75% 35%,rgba(123,97,255,.07) 0%,transparent 65%),radial-gradient(ellipse 40% 40% at 25% 75%,rgba(200,255,0,.04) 0%,transparent 60%)}
+.hero-grid{position:absolute;inset:0;pointer-events:none;background-image:linear-gradient(rgba(255,255,255,.032) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.032) 1px,transparent 1px);background-size:72px 72px;mask-image:radial-gradient(ellipse 90% 90% at 60% 40%,black 10%,transparent 75%)}
 .hero-content{position:relative;z-index:1;max-width:1280px;margin:0 auto;width:100%}
 .hero-eyebrow{display:flex;align-items:center;gap:10px;margin-bottom:1.5rem;font-size:11px;font-weight:600;letter-spacing:.22em;text-transform:uppercase;color:var(--acc)}
 .hero-eyebrow::before{content:'';width:28px;height:1px;background:currentColor}
@@ -21,7 +20,6 @@
 .hero-stats{display:flex;gap:2.5rem}
 .stat .n{font-family:var(--fh);font-size:2.2rem;font-weight:800;letter-spacing:-1.5px;line-height:1;margin-bottom:3px}
 .stat .l{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
-
 /* Gallery */
 .gallery-filters{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:2.5rem}
 .flt{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;padding:5px 14px;border-radius:100px;border:1px solid var(--line2);color:var(--muted);cursor:pointer;transition:all .18s}
@@ -35,12 +33,10 @@
 .g-ph svg{opacity:.08}
 .g-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.88) 0%,transparent 55%);opacity:0;transition:opacity .22s;display:flex;flex-direction:column;justify-content:flex-end;padding:1rem;pointer-events:none}
 .g-item:hover .g-overlay{opacity:1}
-/* 编辑操作按钮区 — 默认隐藏，登录后且悬停才显示 */
 .g-actions{position:absolute;top:8px;right:8px;display:none;gap:6px;z-index:5}
 .g-item:hover .g-actions{display:flex}
 .g-title{font-family:var(--fh);font-size:14px;font-weight:700;line-height:1.2;margin-bottom:4px}
 .g-cat{font-size:10px;letter-spacing:.12em;text-transform:uppercase}
-
 /* Projects */
 .proj-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
 .proj-card{border-radius:var(--rl);overflow:hidden;border:1px solid var(--line);background:var(--bg2);display:flex;flex-direction:column;text-decoration:none;color:inherit;transition:border-color .22s,transform .22s}
@@ -62,36 +58,25 @@
 .proj-add-card{border-radius:var(--rl);border:1px dashed var(--line2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:2rem;cursor:pointer;min-height:220px;background:transparent;transition:all .18s;color:var(--muted)}
 .proj-add-card:hover{border-color:rgba(200,255,0,.35);background:rgba(200,255,0,.02);color:var(--text)}
 .proj-add-card span{font-size:12px;font-family:var(--fh);font-weight:600;letter-spacing:.08em;text-transform:uppercase}
-
-/* Auth visibility — 核心：只有 body.is-auth 时才显示管理 UI */
-.auth-only{display:none!important}
-body.is-auth .auth-only{display:flex!important}
-body.is-auth .auth-only-block{display:block!important}
-.auth-only-block{display:none!important}
-.nav-login-btn{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);border:1px solid var(--line2);padding:6px 14px;border-radius:var(--r);transition:all .18s;cursor:pointer}
-.nav-login-btn:hover{color:var(--text);border-color:var(--line3)}
-
 @media(max-width:900px){.masonry{columns:2}.hero-stats{display:none}}
 @media(max-width:580px){.masonry{columns:1}.proj-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
-
 <nav class="nav">
   <a href="index.html" class="nav-logo">VOLTA<span class="dot">.</span></a>
   <div class="nav-links">
     <a href="#gallery" class="active">作品集</a>
     <a href="#projects">项目</a>
-    <a href="#about">关于</a>
+    <a href="articles.html">文章</a>
+    <a href="posts.html">帖子中心</a>
   </div>
   <div style="display:flex;align-items:center;gap:10px">
-    <!-- 只有登录后才显示发布按钮 -->
-    <button class="btn btn-acc btn-sm auth-only" id="navPublishBtn" onclick="openPostModal()">+ 发布</button>
+    <button class="btn btn-acc btn-sm auth-only" onclick="openPostModal()">+ 发布</button>
     <button class="nav-login-btn" id="authBtn" onclick="onAuthClick()">登录</button>
   </div>
 </nav>
 
-<!-- Hero -->
 <section class="hero">
   <div class="hero-glow"></div><div class="hero-grid"></div>
   <div class="hero-content">
@@ -110,13 +95,12 @@ body.is-auth .auth-only-block{display:block!important}
   </div>
 </section>
 
-<!-- Gallery -->
 <section class="section" id="gallery" style="background:var(--bg2)">
   <div class="container">
     <div class="sh">
       <div class="sh-row">
         <div><div class="sh-label">作品集</div><h2 class="sh-title">精选渲染</h2></div>
-        <button class="btn btn-ghost btn-sm auth-only" onclick="openPostModal('gallery')">+ 上传作品</button>
+        <a href="posts.html" class="btn btn-ghost btn-sm auth-only">管理帖子</a>
       </div>
     </div>
     <div class="gallery-filters" id="galleryFilters"></div>
@@ -128,8 +112,7 @@ body.is-auth .auth-only-block{display:block!important}
   </div>
 </section>
 
-<!-- Projects -->
-<section class="section" id="projects" style="background:var(--bg)">
+<section class="section" id="projects">
   <div class="container">
     <div class="sh">
       <div class="sh-row">
@@ -143,7 +126,6 @@ body.is-auth .auth-only-block{display:block!important}
   </div>
 </section>
 
-<!-- About -->
 <section class="section" id="about" style="background:var(--bg2)">
   <div class="container">
     <div class="sh-label">关于我</div>
@@ -159,60 +141,39 @@ body.is-auth .auth-only-block{display:block!important}
 
 <footer class="footer">
   <span class="footer-copy">© 2026 VOLTA Studio</span>
-  <nav class="footer-links"><a href="#gallery">作品集</a><a href="#projects">项目</a></nav>
+  <nav class="footer-links">
+    <a href="#gallery">作品集</a><a href="#projects">项目</a>
+    <a href="articles.html">文章</a><a href="posts.html">帖子</a>
+  </nav>
 </footer>
 
-<!-- ── Login Modal ── -->
-<div class="modal-overlay" id="loginModal">
-  <div class="modal" style="max-width:380px">
-    <div class="modal-head">
-      <span class="modal-title">登录管理后台</span>
-      <button class="modal-close" onclick="closeModal('loginModal')">✕</button>
-    </div>
-    <div class="fg"><label class="fl">邮箱</label><input class="fi" id="loginEmail" type="email" placeholder="your@email.com" /></div>
-    <div class="fg"><label class="fl">密码</label><input class="fi" id="loginPwd" type="password" placeholder="••••••••" /></div>
-    <div id="loginErr" style="font-size:13px;color:#ff6060;margin-bottom:.75rem;display:none"></div>
-    <div class="modal-foot">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal('loginModal')">取消</button>
-      <button class="btn btn-acc btn-sm" id="loginBtn" onclick="doLogin()">登录</button>
-    </div>
-  </div>
-</div>
-
-<!-- ── Post Modal（发布 / 编辑）── -->
+<!-- Post Modal -->
 <div class="modal-overlay" id="postModal">
   <div class="modal">
     <div class="modal-head">
-      <span class="modal-title" id="postModalTitle">发布内容</span>
+      <span class="modal-title">发布帖子</span>
       <button class="modal-close" onclick="closeModal('postModal')">✕</button>
-    </div>
-    <div class="fg">
-      <label class="fl">类型</label>
-      <select class="fs" id="ptType" onchange="onTypeChange()">
-        <option value="gallery">画廊作品</option>
-        <option value="update">项目进展记录</option>
-      </select>
-    </div>
-    <div class="fg hidden" id="ptProjWrap">
-      <label class="fl">归属项目</label>
-      <select class="fs" id="ptProj" onchange="onProjChange()"></select>
-    </div>
-    <div class="fg hidden" id="ptSpWrap">
-      <label class="fl">归属子项目（可选）</label>
-      <select class="fs" id="ptSp"><option value="">— 不归属子项目 —</option></select>
     </div>
     <div class="fg"><label class="fl">标题</label><input class="fi" id="ptTitle" placeholder="简洁的标题…" /></div>
     <div class="fg"><label class="fl">内容</label><textarea class="ft" id="ptContent" placeholder="描述这次创作…"></textarea></div>
-    <div class="fg" id="ptImgWrap">
+    <div class="fg">
       <label class="fl">图片</label>
       <div class="upload-zone" id="ptZone">
-        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--muted);margin:0 auto"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
-        <p>点击或拖拽图片上传</p>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--muted);margin:0 auto"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+        <p>点击或拖拽上传图片</p>
         <input type="file" id="ptImg" multiple accept="image/*" style="display:none" />
       </div>
       <div class="upload-previews" id="ptPreviews"></div>
     </div>
     <div class="fg"><label class="fl">标签（逗号分隔）</label><input class="fi" id="ptTags" placeholder="建筑, Blender, WIP…" /></div>
+    <div class="fg">
+      <label class="fl">归属设置</label>
+      <label class="checkbox-row" style="margin-bottom:8px">
+        <input type="checkbox" id="ptGallery" checked /> 显示在主页画廊
+      </label>
+      <select class="fs" id="ptProj" style="margin-bottom:6px"><option value="">— 不归属项目 —</option></select>
+      <select class="fs" id="ptSp" class="hidden"><option value="">— 不归属子项目 —</option></select>
+    </div>
     <div class="modal-foot">
       <button class="btn btn-ghost btn-sm" onclick="closeModal('postModal')">取消</button>
       <button class="btn btn-acc btn-sm" id="ptSubmit" onclick="submitPost()">发布</button>
@@ -220,7 +181,7 @@ body.is-auth .auth-only-block{display:block!important}
   </div>
 </div>
 
-<!-- ── Project Modal ── -->
+<!-- Project Modal -->
 <div class="modal-overlay" id="projModal">
   <div class="modal">
     <div class="modal-head">
@@ -230,14 +191,14 @@ body.is-auth .auth-only-block{display:block!important}
     <div class="fg">
       <label class="fl">封面图</label>
       <div class="upload-zone" id="pmZone">
-        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--muted);margin:0 auto"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--muted);margin:0 auto"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
         <p>点击上传封面图（可选）</p>
         <input type="file" id="pmImg" accept="image/*" style="display:none" />
       </div>
       <div class="upload-previews" id="pmPreviews"></div>
     </div>
-    <div class="fg"><label class="fl">项目名称</label><input class="fi" id="pmName" placeholder="项目名称…" /></div>
-    <div class="fg"><label class="fl">简介</label><textarea class="ft" id="pmDesc" placeholder="这个项目在探索什么…" style="min-height:70px"></textarea></div>
+    <div class="fg"><label class="fl">项目名称</label><input class="fi" id="pmName" /></div>
+    <div class="fg"><label class="fl">简介</label><textarea class="ft" id="pmDesc" style="min-height:70px"></textarea></div>
     <div class="fg"><label class="fl">主题色</label><div style="display:flex;gap:8px;flex-wrap:wrap" id="pmColors"></div></div>
     <div class="fg"><label class="fl">状态</label><select class="fs" id="pmStatus"><option value="active">进行中</option><option value="paused">暂停</option></select></div>
     <div class="modal-foot">
@@ -247,14 +208,32 @@ body.is-auth .auth-only-block{display:block!important}
   </div>
 </div>
 
-<!-- ── Lightbox ── -->
-<div class="lb" id="lb">
-  <div class="lb-backdrop" onclick="lbClose()"></div>
-  <div class="lb-inner">
-    <button class="lb-close" onclick="lbClose()">✕</button>
-    <div class="lb-img-wrap">
-      <img id="lbImg" src="" alt="" />
+<!-- Login Modal -->
+<div class="modal-overlay" id="loginModal">
+  <div class="modal" style="max-width:380px">
+    <div class="modal-head">
+      <span class="modal-title">登录</span>
+      <button class="modal-close" onclick="closeModal('loginModal')">✕</button>
     </div>
+    <div class="fg"><label class="fl">邮箱</label><input class="fi" id="loginEmail" type="email" /></div>
+    <div class="fg"><label class="fl">密码</label><input class="fi" id="loginPwd" type="password" /></div>
+    <div id="loginErr" style="font-size:13px;color:#ff6060;display:none;margin-bottom:.5rem"></div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('loginModal')">取消</button>
+      <button class="btn btn-acc btn-sm" id="loginBtn" onclick="doLogin()">登录</button>
+    </div>
+  </div>
+</div>
+
+<!-- Lightbox -->
+<div class="lb" id="lb">
+  <div class="lb-backdrop"></div>
+  <div class="lb-inner">
+    <button class="lb-close" onclick="LB.close()">✕</button>
+    <button class="lb-nav lb-prev" id="lbPrev" onclick="LB.step(-1)">‹</button>
+    <button class="lb-nav lb-next" id="lbNext" onclick="LB.step(1)">›</button>
+    <div class="lb-img-wrap"><img id="lbImg" src="" alt="" /></div>
+    <div class="lb-strip" id="lbStrip"></div>
     <div class="lb-info" id="lbInfo">
       <div class="lb-title" id="lbTitle"></div>
       <p class="lb-text" id="lbText"></p>
@@ -263,315 +242,217 @@ body.is-auth .auth-only-block{display:block!important}
   </div>
 </div>
 
-<!-- ── Confirm ── -->
+<!-- Confirm -->
 <div class="confirm-overlay" id="confirmOverlay">
   <div class="confirm-box">
-    <div class="confirm-title" id="cTitle">确认删除</div>
+    <div class="confirm-title" id="cTitle"></div>
     <p class="confirm-msg" id="cMsg"></p>
     <div class="confirm-actions">
       <button class="btn btn-ghost btn-sm" onclick="cResolve(false)">取消</button>
-      <button class="btn btn-danger btn-sm" onclick="cResolve(true)">删除</button>
+      <button class="btn btn-danger btn-sm" onclick="cResolve(true)">确认</button>
     </div>
   </div>
 </div>
 
 <script src="app.js"></script>
 <script>
-const CAT_COLORS = {'建筑':'#7b61ff','角色':'#ff6b35','环境':'#c8ff00','抽象':'#00d4ff','产品':'#ff3cac'};
-let activeFilter = 'all';
-let pmColor = PROJ_COLORS[0];
-let _projects = [];
-// 用 Map 存帖子数据，供灯箱使用，避免 JSON 在 HTML 属性里的转义问题
-let _postMap = new Map();
-const postUp = makeUploader();
-const pmUp   = makeUploader();
-let _editingPostId = null;
+const CAT_COLORS={'建筑':'#7b61ff','角色':'#ff6b35','环境':'#c8ff00','抽象':'#00d4ff','产品':'#ff3cac'};
+let _filter='all', _projects=[], _postMap=new Map();
+let pmColor=PROJ_COLORS[0];
+const postUp=makeUploader(), pmUp=makeUploader();
 
-// ── Helpers ──
-function closeModal(id) { document.getElementById(id).classList.remove('open'); }
-function openModal(id)  { document.getElementById(id).classList.add('open'); }
-function hidden(id,v)   { document.getElementById(id).classList.toggle('hidden', v); }
-['postModal','projModal','loginModal'].forEach(id =>
-  document.getElementById(id).addEventListener('click', e => { if(e.target===document.getElementById(id)) closeModal(id); })
+function closeModal(id){document.getElementById(id).classList.remove('open')}
+function openModal(id){document.getElementById(id).classList.add('open')}
+['postModal','projModal','loginModal'].forEach(id=>
+  document.getElementById(id).addEventListener('click',e=>{if(e.target.id===id)closeModal(id)})
 );
 initConfirm();
 
-// ── Skeleton CSS（内联避免多一个文件）──
-const sk = document.createElement('style');
-sk.textContent='.skeleton{background:linear-gradient(90deg,var(--bg3) 25%,var(--bg4) 50%,var(--bg3) 75%);background-size:200% 100%;animation:shimmer 1.5s infinite;border-radius:var(--r)}@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}';
-document.head.appendChild(sk);
-
 // ── Auth ──
-function updateAuthUI() {
-  const ok = SB.isLoggedIn();
-  document.body.classList.toggle('is-auth', ok);
-  document.getElementById('authBtn').textContent = ok ? '登出' : '登录';
-}
-function onAuthClick() {
-  if (SB.isLoggedIn()) { SB.signOut(); updateAuthUI(); toast('已登出'); loadGallery(); loadProjects(); }
+function onAuthClick(){
+  if(SB.isLoggedIn()){SB.signOut();applyAuthUI();toast('已登出');loadAll();}
   else openModal('loginModal');
 }
-async function doLogin() {
-  const btn = document.getElementById('loginBtn');
-  const email = document.getElementById('loginEmail').value.trim();
-  const pwd   = document.getElementById('loginPwd').value;
-  const errEl = document.getElementById('loginErr');
-  errEl.style.display = 'none';
-  if (!email || !pwd) { errEl.textContent='请填写邮箱和密码'; errEl.style.display='block'; return; }
-  btn.textContent='登录中…'; btn.disabled=true;
-  try {
-    await SB.signIn(email, pwd);
-    closeModal('loginModal');
-    updateAuthUI();
-    toast('登录成功 ✓');
-    loadGallery(); loadProjects();
-  } catch(e) { errEl.textContent='邮箱或密码错误'; errEl.style.display='block'; }
-  btn.textContent='登录'; btn.disabled=false;
+async function doLogin(){
+  const btn=document.getElementById('loginBtn'),errEl=document.getElementById('loginErr');
+  const email=document.getElementById('loginEmail').value.trim();
+  const pwd=document.getElementById('loginPwd').value;
+  errEl.style.display='none';
+  if(!email||!pwd){errEl.textContent='请填写邮箱和密码';errEl.style.display='block';return;}
+  btn.textContent='登录中…';btn.disabled=true;
+  try{
+    await SB.signIn(email,pwd);
+    closeModal('loginModal');applyAuthUI();
+    document.getElementById('authBtn').textContent='登出';
+    toast('登录成功 ✓');loadAll();
+  }catch(e){errEl.textContent='邮箱或密码错误';errEl.style.display='block';}
+  btn.textContent='登录';btn.disabled=false;
 }
-document.getElementById('loginPwd').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
+document.getElementById('loginPwd').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
 
 // ── Gallery ──
-const ALL_CATS = Object.keys(CAT_COLORS);
-function renderGalleryFilters() {
-  document.getElementById('galleryFilters').innerHTML =
-    ['all',...ALL_CATS].map(c=>`<button class="flt ${c===activeFilter?'on':''}" onclick="setFilter('${c}')">${c==='all'?'全部':c}</button>`).join('');
+function renderFilters(){
+  document.getElementById('galleryFilters').innerHTML=
+    ['all',...Object.keys(CAT_COLORS)].map(c=>
+      `<button class="flt ${c===_filter?'on':''}" onclick="setFilter('${c}')">${c==='all'?'全部':c}</button>`
+    ).join('');
 }
-function setFilter(f) { activeFilter=f; renderGalleryFilters(); loadGallery(); }
+function setFilter(f){_filter=f;renderFilters();renderGallery();}
 
-async function loadGallery() {
-  const grid = document.getElementById('galleryGrid');
-  try {
-    let posts = await SB.getPosts({ type:'gallery', noProject:true });
-    if (activeFilter !== 'all') posts = posts.filter(p => (p.tags||[]).includes(activeFilter));
-    _postMap.clear();
-    posts.forEach(p => _postMap.set(p.id, p));
+function renderGallery(){
+  const grid=document.getElementById('galleryGrid');
+  const isAuth=SB.isLoggedIn();
+  let posts=[..._postMap.values()].filter(p=>p.show_in_gallery);
+  if(_filter!=='all') posts=posts.filter(p=>(p.tags||[]).includes(_filter));
+  posts.sort((a,b)=>b.created_at.localeCompare(a.created_at));
+  if(!posts.length){grid.innerHTML='<div style="color:var(--muted);font-size:14px;padding:2rem 0">还没有画廊作品。</div>';return;}
+  grid.innerHTML=posts.map(p=>{
+    const cat=(p.tags||[]).find(t=>CAT_COLORS[t]);
+    const imgEl=p.images&&p.images[0]
+      ?`<img src="${esc(p.images[0])}" loading="lazy" onclick="openLb('${p.id}')" />`
+      :`<div class="g-ph"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></div>`;
+    const actions=isAuth?`<div class="g-actions">
+      <a href="posts.html?edit=${p.id}" class="btn btn-ghost btn-sm btn-icon" title="编辑" onclick="event.stopPropagation()">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4z"/></svg>
+      </a>
+    </div>`:'';
+    return `<div class="g-item">
+      ${imgEl}${actions}
+      <div class="g-overlay">
+        <div class="g-title">${esc(p.title)}</div>
+        ${cat?`<div class="g-cat" style="color:${CAT_COLORS[cat]}">${cat}</div>`:''}
+      </div>
+    </div>`;
+  }).join('');
+}
 
-    if (!posts.length) {
-      grid.innerHTML = `<div style="color:var(--muted);font-size:14px;padding:2rem 0">还没有作品，点击「上传作品」开始。</div>`;
-      return;
-    }
-    const isAuth = SB.isLoggedIn();
-    grid.innerHTML = posts.map(p => {
-      const cat   = (p.tags||[]).find(t=>CAT_COLORS[t]);
-      const color = cat ? CAT_COLORS[cat] : '#666';
-      const imgEl = p.cover_image
-        ? `<img src="${p.cover_image}" loading="lazy" onclick="lbOpen('${p.id}')" />`
-        : `<div class="g-ph"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></div>`;
-      // 管理按钮：只在 isAuth 时渲染到 DOM，CSS 控制悬停显示
-      const actions = isAuth ? `
-        <div class="g-actions">
-          <button class="btn btn-ghost btn-sm btn-icon" onclick="editPost(event,'${p.id}')" title="编辑">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4z"/></svg>
-          </button>
-          <button class="btn btn-danger btn-sm btn-icon" onclick="deletePost(event,'${p.id}')" title="删除">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
-          </button>
-        </div>` : '';
-      return `
-        <div class="g-item" data-id="${p.id}">
-          ${imgEl}
-          ${actions}
-          <div class="g-overlay">
-            <div class="g-title">${p.title}</div>
-            ${cat?`<div class="g-cat" style="color:${color}">${cat}</div>`:''}
-          </div>
-        </div>`;
-    }).join('');
-  } catch(e) { grid.innerHTML = `<div style="color:#ff6060;font-size:13px;padding:1rem 0">加载失败：${e.message}</div>`; }
+function openLb(id){
+  const p=_postMap.get(id);if(!p)return;
+  LB.open(p.images||[],0,{title:p.title,content:p.content,tags:p.tags});
 }
 
 // ── Projects ──
-async function loadProjects() {
-  const grid = document.getElementById('projGrid');
-  try {
-    _projects = await SB.getProjects();
-    const allPosts = await SB.getPosts({ type:'update' });
-    const cntMap = {};
-    allPosts.forEach(p => { cntMap[p.project_id] = (cntMap[p.project_id]||0)+1; });
-    const isAuth = SB.isLoggedIn();
-    grid.innerHTML = _projects.map(p => {
-      const cnt = cntMap[p.id] || 0;
-      const sps = p.sub_projects || [];
-      const cover = p.cover_image
-        ? `<img src="${p.cover_image}">`
-        : `<div class="proj-cover-ph"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></div>`;
-      return `
-        <a class="proj-card" href="project.html?id=${p.id}">
-          <div class="proj-cover">${cover}<div class="proj-cover-overlay"></div></div>
-          <div class="proj-bar" style="background:${p.color}"></div>
-          <div class="proj-body">
-            <div class="proj-head">
-              <div class="proj-name" style="color:${p.color}">${p.name}</div>
-              <span class="badge ${p.status==='active'?'badge-active':'badge-paused'}">${p.status==='active'?'进行中':'暂停'}</span>
-            </div>
-            <p class="proj-desc">${p.description||''}</p>
-            <div class="proj-meta">
-              <span class="proj-meta-info">${sps.length} 个子项目 · ${cnt} 条记录</span>
-              <span class="proj-arrow">→</span>
-            </div>
+async function loadProjects(){
+  const grid=document.getElementById('projGrid');
+  const isAuth=SB.isLoggedIn();
+  try{
+    _projects=await SB.getProjects();
+    const allPosts=await SB.getPosts({});
+    const cntMap={};
+    allPosts.forEach(p=>{if(p.project_id)cntMap[p.project_id]=(cntMap[p.project_id]||0)+1;});
+    grid.innerHTML=_projects.map(p=>{
+      const cnt=cntMap[p.id]||0, sps=p.sub_projects||[];
+      const cover=p.cover_image
+        ?`<img src="${esc(p.cover_image)}">`
+        :`<div class="proj-cover-ph"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></div>`;
+      return `<a class="proj-card" href="project.html?id=${p.id}">
+        <div class="proj-cover">${cover}<div class="proj-cover-overlay"></div></div>
+        <div class="proj-bar" style="background:${p.color}"></div>
+        <div class="proj-body">
+          <div class="proj-head">
+            <div class="proj-name" style="color:${p.color}">${esc(p.name)}</div>
+            <span class="badge ${p.status==='active'?'badge-active':'badge-paused'}">${p.status==='active'?'进行中':'暂停'}</span>
           </div>
-        </a>`;
-    }).join('') + (isAuth ? `
-      <button class="proj-add-card" onclick="openProjModal()">
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>
-        <span>新建项目</span>
-      </button>` : '');
-
-    const galleryPosts = await SB.getPosts({ type:'gallery', noProject:true });
-    document.getElementById('heroStats').innerHTML = `
-      <div class="stat"><div class="n">${galleryPosts.length}</div><div class="l">作品</div></div>
-      <div class="stat"><div class="n">${_projects.length}</div><div class="l">长期项目</div></div>
-      <div class="stat"><div class="n">3+</div><div class="l">年经验</div></div>`;
-  } catch(e) { grid.innerHTML = `<div style="color:#ff6060;font-size:13px">加载失败：${e.message}</div>`; }
+          <p class="proj-desc">${esc(p.description||'')}</p>
+          <div class="proj-meta">
+            <span class="proj-meta-info">${sps.length} 个子项目 · ${cnt} 条记录</span>
+            <span class="proj-arrow">→</span>
+          </div>
+        </div>
+      </a>`;
+    }).join('')+(isAuth?`<button class="proj-add-card" onclick="openProjModal()">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>
+      <span>新建项目</span>
+    </button>`:'');
+  }catch(e){grid.innerHTML=`<div style="color:#ff6060;font-size:13px">加载失败：${e.message}</div>`;}
 }
 
-// ── Post Modal（新增 & 编辑复用）──
-function openPostModal(defaultType='gallery') {
-  if (!SB.isLoggedIn()) { openModal('loginModal'); return; }
-  _editingPostId = null;
+// ── Post Modal ──
+function openPostModal(){
+  if(!SB.isLoggedIn()){openModal('loginModal');return;}
   postUp.reset(document.getElementById('ptPreviews'));
-  ['ptTitle','ptContent','ptTags'].forEach(id => document.getElementById(id).value='');
-  document.getElementById('ptType').value = defaultType;
-  document.getElementById('ptImgWrap').style.display = 'block';
-  document.getElementById('postModalTitle').textContent = '发布内容';
-  document.getElementById('ptSubmit').textContent = '发布';
-  onTypeChange();
+  ['ptTitle','ptContent','ptTags'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('ptGallery').checked=true;
+  document.getElementById('ptProj').innerHTML='<option value="">— 不归属项目 —</option>'+
+    _projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  document.getElementById('ptSp').innerHTML='<option value="">— 不归属子项目 —</option>';
+  document.getElementById('ptProj').onchange=()=>{
+    const proj=_projects.find(p=>p.id===document.getElementById('ptProj').value);
+    document.getElementById('ptSp').innerHTML='<option value="">— 不归属子项目 —</option>'+
+      ((proj?.sub_projects||[]).map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join(''));
+  };
   openModal('postModal');
 }
-
-function editPost(e, id) {
-  e.preventDefault(); e.stopPropagation();
-  if (!SB.isLoggedIn()) return;
-  const p = _postMap.get(id);
-  if (!p) return;
-  _editingPostId = id;
-  postUp.reset(document.getElementById('ptPreviews'));
-  document.getElementById('postModalTitle').textContent = '编辑内容';
-  document.getElementById('ptSubmit').textContent = '保存';
-  document.getElementById('ptType').value = p.type;
-  document.getElementById('ptTitle').value = p.title || '';
-  document.getElementById('ptContent').value = p.content || '';
-  document.getElementById('ptTags').value = (p.tags||[]).join(', ');
-  // 图片上传区隐藏（编辑时不强制重新上传图片）
-  document.getElementById('ptImgWrap').style.display = 'none';
-  onTypeChange();
-  openModal('postModal');
-}
-
-function onTypeChange() {
-  const isUpdate = document.getElementById('ptType').value === 'update';
-  hidden('ptProjWrap', !isUpdate);
-  hidden('ptSpWrap',   !isUpdate);
-  if (isUpdate) {
-    document.getElementById('ptProj').innerHTML = _projects.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
-    onProjChange();
-  }
-}
-function onProjChange() {
-  const proj = _projects.find(p=>p.id===document.getElementById('ptProj').value);
-  document.getElementById('ptSp').innerHTML = '<option value="">— 不归属子项目 —</option>' +
-    ((proj?.sub_projects||[]).map(s=>`<option value="${s.id}">${s.name}</option>`).join(''));
-}
-
-async function submitPost() {
-  const btn = document.getElementById('ptSubmit');
-  btn.disabled = true;
-  try {
-    const title   = document.getElementById('ptTitle').value.trim();
-    const content = document.getElementById('ptContent').value.trim();
-    const tags    = document.getElementById('ptTags').value.split(/[,，]/).map(t=>t.trim()).filter(Boolean);
-    if (!title) { toast('请填写标题','err'); btn.disabled=false; return; }
-
-    if (_editingPostId) {
-      // 编辑模式：只更新文字字段
-      btn.textContent='保存中…';
-      await SB.updatePost(_editingPostId, { title, content, tags });
-      toast('已保存 ✓');
-    } else {
-      // 新建模式：上传图片
-      const files = postUp.getFiles();
-      let urls = [];
-      if (files.length) { btn.textContent='上传图片…'; urls = await uploadImages(files); }
-      btn.textContent='发布中…';
-      const type      = document.getElementById('ptType').value;
-      const projectId = type==='update' ? (document.getElementById('ptProj').value||null) : null;
-      const spId      = type==='update' ? (document.getElementById('ptSp').value||null)   : null;
-      await SB.addPost({ type, title, content, tags, projectId, subProjectId:spId, coverImage:urls[0]||null, images:urls });
-      toast('发布成功 ✓');
-    }
-    closeModal('postModal');
-    loadGallery(); loadProjects();
-  } catch(e) { toast('操作失败：'+e.message,'err'); }
-  btn.textContent = _editingPostId ? '保存' : '发布';
-  btn.disabled = false;
-}
-
-// ── Delete Post ──
-async function deletePost(e, id) {
-  e.preventDefault(); e.stopPropagation();
-  const ok = await confirm2('删除作品','确定删除这条作品？此操作不可撤销。');
-  if (!ok) return;
-  try { await SB.deletePost(id); toast('已删除'); loadGallery(); loadProjects(); }
-  catch(e) { toast('删除失败','err'); }
+async function submitPost(){
+  const btn=document.getElementById('ptSubmit');
+  btn.disabled=true;
+  try{
+    const files=postUp.getFiles();
+    let urls=[];
+    if(files.length){btn.textContent='上传图片…';urls=await uploadImages(files);}
+    btn.textContent='发布中…';
+    const title=document.getElementById('ptTitle').value.trim();
+    if(!title){toast('请填写标题','err');btn.textContent='发布';btn.disabled=false;return;}
+    await SB.addPost({
+      title,
+      content:document.getElementById('ptContent').value.trim(),
+      tags:document.getElementById('ptTags').value.split(/[,，]/).map(t=>t.trim()).filter(Boolean),
+      images:urls,
+      showInGallery:document.getElementById('ptGallery').checked,
+      projectId:document.getElementById('ptProj').value||null,
+      subProjectId:document.getElementById('ptSp').value||null,
+    });
+    closeModal('postModal');toast('发布成功 ✓');loadAll();
+  }catch(e){toast('发布失败：'+e.message,'err');}
+  btn.textContent='发布';btn.disabled=false;
 }
 
 // ── Project Modal ──
-function openProjModal() {
+function openProjModal(){
   pmUp.reset(document.getElementById('pmPreviews'));
-  ['pmName','pmDesc'].forEach(id => document.getElementById(id).value='');
+  ['pmName','pmDesc'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('pmStatus').value='active';
   pmColor=PROJ_COLORS[0];
-  buildColorPicker('pmColors', pmColor, c=>{pmColor=c;});
+  buildColorPicker('pmColors',pmColor,c=>{pmColor=c;});
   openModal('projModal');
 }
-async function submitProject() {
-  const btn = document.getElementById('pmSubmit');
-  btn.textContent='处理中…'; btn.disabled=true;
-  try {
-    const files = pmUp.getFiles();
-    let coverImage = null;
-    if (files.length) coverImage = await uploadImage(files[0]);
+async function submitProject(){
+  const btn=document.getElementById('pmSubmit');btn.textContent='处理中…';btn.disabled=true;
+  try{
+    const files=pmUp.getFiles();
+    const cover_image=files.length?await uploadImage(files[0]):null;
     const name=document.getElementById('pmName').value.trim();
-    const desc=document.getElementById('pmDesc').value.trim();
-    const status=document.getElementById('pmStatus').value;
-    if (!name) { toast('请填写项目名称','err'); btn.textContent='创建'; btn.disabled=false; return; }
-    await SB.addProject({name,description:desc,color:pmColor,status,cover_image:coverImage});
-    closeModal('projModal'); toast('项目已创建 ✓'); loadProjects();
-  } catch(e) { toast('创建失败：'+e.message,'err'); }
-  btn.textContent='创建'; btn.disabled=false;
+    if(!name){toast('请填写项目名称','err');btn.textContent='创建';btn.disabled=false;return;}
+    await SB.addProject({name,description:document.getElementById('pmDesc').value.trim(),color:pmColor,status:document.getElementById('pmStatus').value,cover_image});
+    closeModal('projModal');toast('项目已创建 ✓');loadProjects();
+  }catch(e){toast('创建失败：'+e.message,'err');}
+  btn.textContent='创建';btn.disabled=false;
 }
 
-// ── Lightbox ──
-// 通过 id 查 Map，完全避免 JSON 在 HTML 属性里的转义问题
-function lbOpen(postId) {
-  const p = _postMap.get(postId);
-  if (!p) return;
-  const img = document.getElementById('lbImg');
-  img.src = p.cover_image || '';
-  // info
-  document.getElementById('lbTitle').textContent = p.title || '';
-  const textEl = document.getElementById('lbText');
-  textEl.textContent = p.content || '';
-  textEl.style.display = p.content ? 'block' : 'none';
-  document.getElementById('lbTags').innerHTML = (p.tags||[]).map(t=>`<span class="tag">${t}</span>`).join('');
-  document.getElementById('lbInfo').style.display = p.title ? 'block' : 'none';
-  document.getElementById('lb').classList.add('open');
-  document.body.style.overflow = 'hidden';
+async function loadAll(){
+  // 加载画廊帖子
+  try{
+    const posts=await SB.getPosts({});
+    _postMap.clear();
+    posts.forEach(p=>_postMap.set(p.id,p));
+    renderFilters();renderGallery();
+    document.getElementById('heroStats').innerHTML=`
+      <div class="stat"><div class="n">${[..._postMap.values()].filter(p=>p.show_in_gallery).length}</div><div class="l">作品</div></div>
+      <div class="stat"><div class="n" id="projCnt">—</div><div class="l">长期项目</div></div>
+      <div class="stat"><div class="n">3+</div><div class="l">年经验</div></div>`;
+  }catch(e){}
+  loadProjects().then(()=>{
+    const el=document.getElementById('projCnt');
+    if(el)el.textContent=_projects.length;
+  });
 }
-function lbClose() {
-  document.getElementById('lb').classList.remove('open');
-  document.body.style.overflow = '';
-  document.getElementById('lbImg').src = '';
-}
-document.addEventListener('keydown', e => { if(e.key==='Escape') lbClose(); });
 
-// ── Init ──
-postUp.mount(document.getElementById('ptZone'), document.getElementById('ptImg'), document.getElementById('ptPreviews'));
-pmUp.mount(document.getElementById('pmZone'), document.getElementById('pmImg'), document.getElementById('pmPreviews'));
-updateAuthUI();
-renderGalleryFilters();
-loadGallery();
-loadProjects();
+postUp.mount(document.getElementById('ptZone'),document.getElementById('ptImg'),document.getElementById('ptPreviews'));
+pmUp.mount(document.getElementById('pmZone'),document.getElementById('pmImg'),document.getElementById('pmPreviews'));
+applyAuthUI();
+document.getElementById('authBtn').textContent=SB.isLoggedIn()?'登出':'登录';
+renderFilters();
+loadAll();
 </script>
 </body>
 </html>

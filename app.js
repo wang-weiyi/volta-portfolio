@@ -1,5 +1,5 @@
 // ══════════════════════════════════════════════════════════════
-//  在下面填入你的配置（参考 setup-guide.html 第5步）
+//  填入你的配置
 // ══════════════════════════════════════════════════════════════
 const CONFIG = {
   supabase: {
@@ -8,26 +8,42 @@ const CONFIG = {
   },
   cloudinary: {
     cloudName:    'dipaqqlxf',               // ← 替换
-    uploadPreset: 'volta_uploads',                 // ← 如果改了 preset 名就改这里
+    uploadPreset: 'volta_uploads',
   }
 };
 // ══════════════════════════════════════════════════════════════
 
-// ── Supabase 轻量客户端 ────────────────────────────────────────
+// ── Session 持久化（最简实现，无 monkey-patch）────────────────
+const Auth = (() => {
+  const KEY = 'volta_sess';
+  let _tok = null;
+
+  // 页面加载时恢复
+  try {
+    const raw = sessionStorage.getItem(KEY);
+    if (raw) _tok = JSON.parse(raw).access_token || null;
+  } catch(e) {}
+
+  return {
+    token()     { return _tok; },
+    isLoggedIn(){ return !!_tok; },
+    save(data)  { _tok = data.access_token; try { sessionStorage.setItem(KEY, JSON.stringify(data)); } catch(e) {} },
+    clear()     { _tok = null; try { sessionStorage.removeItem(KEY); } catch(e) {} },
+  };
+})();
+
+// ── Supabase 客户端 ───────────────────────────────────────────
 const SB = (() => {
   const { url, key } = CONFIG.supabase;
-  let _session = null;
 
   async function req(path, opts = {}) {
     const headers = {
       'apikey': key,
       'Content-Type': 'application/json',
       'Prefer': 'return=representation',
-      ...opts.headers
+      ...(Auth.token() ? { 'Authorization': 'Bearer ' + Auth.token() } : {}),
+      ...(opts.headers || {}),
     };
-    if (_session?.access_token) {
-      headers['Authorization'] = 'Bearer ' + _session.access_token;
-    }
     const res = await fetch(url + path, { ...opts, headers });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -38,273 +54,267 @@ const SB = (() => {
   }
 
   return {
+    isLoggedIn() { return Auth.isLoggedIn(); },
+
     // ── Auth ──
     async signIn(email, password) {
       const data = await req('/auth/v1/token?grant_type=password', {
         method: 'POST',
         body: JSON.stringify({ email, password })
       });
-      _session = data;
+      Auth.save(data);
       return data;
     },
-    signOut() { _session = null; },
-    getSession() { return _session; },
-    isLoggedIn() { return !!_session?.access_token; },
+    signOut() { Auth.clear(); },
 
     // ── Projects ──
     async getProjects() {
       return req('/rest/v1/projects?order=created_at.asc&select=*,sub_projects(*)');
     },
     async getProject(id) {
-      const rows = await req(`/rest/v1/projects?id=eq.${id}&select=*,sub_projects(*)`);
+      const rows = await req(`/rest/v1/projects?id=eq.${encodeURIComponent(id)}&select=*,sub_projects(*)`);
       return rows[0] || null;
     },
     async addProject(data) {
-      const rows = await req('/rest/v1/projects', { method: 'POST', body: JSON.stringify(data) });
+      const rows = await req('/rest/v1/projects', { method:'POST', body:JSON.stringify(data) });
       return rows[0];
     },
     async updateProject(id, data) {
-      const rows = await req(`/rest/v1/projects?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+      const rows = await req(`/rest/v1/projects?id=eq.${encodeURIComponent(id)}`, { method:'PATCH', body:JSON.stringify(data) });
       return rows[0];
     },
     async deleteProject(id) {
-      await req(`/rest/v1/projects?id=eq.${id}`, { method: 'DELETE' });
+      await req(`/rest/v1/projects?id=eq.${encodeURIComponent(id)}`, { method:'DELETE' });
     },
 
     // ── SubProjects ──
     async addSubProject(data) {
-      const rows = await req('/rest/v1/sub_projects', { method: 'POST', body: JSON.stringify(data) });
+      const rows = await req('/rest/v1/sub_projects', { method:'POST', body:JSON.stringify(data) });
       return rows[0];
     },
     async deleteSubProject(id) {
-      await req(`/rest/v1/sub_projects?id=eq.${id}`, { method: 'DELETE' });
+      await req(`/rest/v1/sub_projects?id=eq.${encodeURIComponent(id)}`, { method:'DELETE' });
     },
 
     // ── Posts ──
+    // filter: { gallery, projectId, subProjectId }
     async getPosts(filter = {}) {
       let qs = 'order=created_at.desc&select=*';
-      if (filter.type)          qs += `&type=eq.${filter.type}`;
-      if (filter.projectId)     qs += `&project_id=eq.${filter.projectId}`;
-      if (filter.subProjectId)  qs += `&sub_project_id=eq.${filter.subProjectId}`;
-      if (filter.noProject)     qs += '&project_id=is.null';
+      if (filter.gallery === true)       qs += '&show_in_gallery=eq.true';
+      if (filter.gallery === false)      qs += '&show_in_gallery=eq.false';
+      if (filter.projectId)              qs += `&project_id=eq.${encodeURIComponent(filter.projectId)}`;
+      if (filter.subProjectId)           qs += `&sub_project_id=eq.${encodeURIComponent(filter.subProjectId)}`;
+      if (filter.noProject === true)     qs += '&project_id=is.null';
       return req(`/rest/v1/posts?${qs}`);
     },
+    async getPost(id) {
+      const rows = await req(`/rest/v1/posts?id=eq.${encodeURIComponent(id)}&select=*`);
+      return rows[0] || null;
+    },
     async addPost(data) {
-      // Supabase column names use snake_case
       const payload = {
-        type:           data.type,
-        title:          data.title,
-        content:        data.content || '',
-        cover_image:    data.coverImage || null,
-        images:         data.images || [],
-        tags:           data.tags || [],
-        project_id:     data.projectId || null,
-        sub_project_id: data.subProjectId || null,
+        title:           data.title          || '',
+        content:         data.content        || '',
+        images:          data.images         || [],
+        tags:            data.tags           || [],
+        show_in_gallery: data.showInGallery  ?? false,
+        project_id:      data.projectId      || null,
+        sub_project_id:  data.subProjectId   || null,
       };
-      const rows = await req('/rest/v1/posts', { method: 'POST', body: JSON.stringify(payload) });
+      const rows = await req('/rest/v1/posts', { method:'POST', body:JSON.stringify(payload) });
+      return rows[0];
+    },
+    async updatePost(id, data) {
+      const rows = await req(`/rest/v1/posts?id=eq.${encodeURIComponent(id)}`, { method:'PATCH', body:JSON.stringify(data) });
       return rows[0];
     },
     async deletePost(id) {
-      await req(`/rest/v1/posts?id=eq.${id}`, { method: 'DELETE' });
+      await req(`/rest/v1/posts?id=eq.${encodeURIComponent(id)}`, { method:'DELETE' });
     },
-    async updatePost(id, data) {
-      const rows = await req(`/rest/v1/posts?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+
+    // ── Articles ──
+    async getArticles(publishedOnly = true) {
+      let qs = 'order=created_at.desc&select=*';
+      if (publishedOnly) qs += '&status=eq.published';
+      return req(`/rest/v1/articles?${qs}`);
+    },
+    async getArticle(id) {
+      const rows = await req(`/rest/v1/articles?id=eq.${encodeURIComponent(id)}&select=*`);
+      return rows[0] || null;
+    },
+    async addArticle(data) {
+      const rows = await req('/rest/v1/articles', { method:'POST', body:JSON.stringify(data) });
       return rows[0];
+    },
+    async updateArticle(id, data) {
+      const payload = { ...data, updated_at: new Date().toISOString() };
+      const rows = await req(`/rest/v1/articles?id=eq.${encodeURIComponent(id)}`, { method:'PATCH', body:JSON.stringify(payload) });
+      return rows[0];
+    },
+    async deleteArticle(id) {
+      await req(`/rest/v1/articles?id=eq.${encodeURIComponent(id)}`, { method:'DELETE' });
     },
   };
 })();
 
-// ── Cloudinary 图片上传 ────────────────────────────────────────
+// ── Cloudinary ────────────────────────────────────────────────
 async function uploadImage(file) {
   const fd = new FormData();
   fd.append('file', file);
   fd.append('upload_preset', CONFIG.cloudinary.uploadPreset);
   const res = await fetch(
     `https://api.cloudinary.com/v1_1/${CONFIG.cloudinary.cloudName}/image/upload`,
-    { method: 'POST', body: fd }
+    { method:'POST', body:fd }
   );
   if (!res.ok) throw new Error('图片上传失败');
   const data = await res.json();
-  return data.secure_url;  // 永久 HTTPS URL
+  return data.secure_url;
 }
-
 async function uploadImages(files) {
   return Promise.all(Array.from(files).map(uploadImage));
 }
 
-// ── Uploader UI 组件 ────────────────────────────────────────────
-// 返回 { mount, getFiles, reset }
-// mount 之后用户选图片，getFiles() 返回 File 数组，提交时再统一上传
+// ── Uploader 组件（新增图片，追加到现有列表）────────────────
 function makeUploader() {
-  let files = [];
-
+  let _files = [];
   const self = {
     mount(zone, input, preview) {
-      zone.onclick    = () => input.click();
-      zone.ondragover = e => { e.preventDefault(); zone.style.borderColor = 'rgba(200,255,0,0.5)'; };
-      zone.ondragleave= () => { zone.style.borderColor = ''; };
-      zone.ondrop     = e => { e.preventDefault(); zone.style.borderColor = ''; self._add(e.dataTransfer.files, preview); };
-      input.onchange  = () => { self._add(input.files, preview); input.value = ''; };
+      zone.onclick     = () => input.click();
+      zone.ondragover  = e => { e.preventDefault(); zone.style.borderColor='rgba(200,255,0,.5)'; };
+      zone.ondragleave = () => { zone.style.borderColor=''; };
+      zone.ondrop      = e => { e.preventDefault(); zone.style.borderColor=''; self._add(e.dataTransfer.files, preview); };
+      input.onchange   = () => { self._add(input.files, preview); input.value=''; };
     },
     _add(fileList, preview) {
       Array.from(fileList).forEach(f => {
-        files.push(f);
+        _files.push(f);
         const url = URL.createObjectURL(f);
         const item = document.createElement('div');
         item.className = 'upload-preview-item';
         item.innerHTML = `<img src="${url}"><div class="rm">✕</div>`;
         item.querySelector('.rm').onclick = () => {
-          files = files.filter(x => x !== f);
+          _files = _files.filter(x => x !== f);
           item.remove();
           URL.revokeObjectURL(url);
         };
         preview.appendChild(item);
       });
     },
-    getFiles()      { return [...files]; },
-    hasFiles()      { return files.length > 0; },
-    reset(preview)  { files = []; if (preview) preview.innerHTML = ''; }
+    getFiles()     { return [..._files]; },
+    reset(preview) { _files = []; if (preview) preview.innerHTML = ''; },
   };
   return self;
 }
 
-// ── 通用 Confirm 对话框 ────────────────────────────────────────
+// ── 图片列表编辑器（用于编辑已有帖子的 images[]）────────────
+// 渲染一组已有 URL，每张可删除，可追加新图片
+// 返回 getImages() → 最终 URL 数组（含新上传的）
+function makeImageEditor(containerEl, initialUrls = []) {
+  let _urls   = [...initialUrls]; // 已有 URL
+  let _newFiles = [];             // 待上传的新文件
+
+  function render() {
+    containerEl.innerHTML = '';
+    _urls.forEach((u, i) => {
+      const item = document.createElement('div');
+      item.className = 'upload-preview-item';
+      item.style.position = 'relative';
+      item.innerHTML = `<img src="${u}"><div class="rm" data-i="${i}">✕</div>`;
+      item.querySelector('.rm').onclick = () => {
+        _urls.splice(i, 1);
+        render();
+      };
+      containerEl.appendChild(item);
+    });
+    // 新文件预览
+    _newFiles.forEach((f, i) => {
+      const url = URL.createObjectURL(f);
+      const item = document.createElement('div');
+      item.className = 'upload-preview-item';
+      item.style.outline = '2px solid var(--acc)';
+      item.innerHTML = `<img src="${url}"><div class="rm">✕</div>`;
+      item.querySelector('.rm').onclick = () => {
+        _newFiles.splice(i, 1);
+        URL.revokeObjectURL(url);
+        render();
+      };
+      containerEl.appendChild(item);
+    });
+  }
+
+  render();
+
+  return {
+    addFiles(fileList) {
+      _newFiles.push(...Array.from(fileList));
+      render();
+    },
+    async getImages() {
+      // 上传新文件，合并到 URL 列表
+      if (_newFiles.length) {
+        const newUrls = await uploadImages(_newFiles);
+        _urls = [..._urls, ...newUrls];
+        _newFiles = [];
+        render();
+      }
+      return [..._urls];
+    },
+    reset(urls = []) { _urls = [...urls]; _newFiles = []; render(); },
+  };
+}
+
+// ── Toast ────────────────────────────────────────────────────
+function toast(msg, type = 'ok') {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  document.body.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('show'));
+  setTimeout(() => { el.classList.remove('show'); setTimeout(() => el.remove(), 300); }, 2800);
+}
+
+// ── Confirm dialog ────────────────────────────────────────────
 let _cResolve = () => {};
 function confirm2(title, msg) {
   document.getElementById('cTitle').textContent = title;
   document.getElementById('cMsg').textContent   = msg;
   document.getElementById('confirmOverlay').classList.add('open');
   return new Promise(res => {
-    _cResolve = v => {
-      document.getElementById('confirmOverlay').classList.remove('open');
-      res(v);
-    };
+    _cResolve = v => { document.getElementById('confirmOverlay').classList.remove('open'); res(v); };
   });
 }
-// 需要在页面里调用这个来绑定 confirm 按钮
 function initConfirm() {
   document.getElementById('confirmOverlay').addEventListener('click',
     e => { if (e.target.id === 'confirmOverlay') _cResolve(false); }
   );
 }
-// 暴露给 HTML onclick
 window.cResolve = v => _cResolve(v);
 
-// ── Toast 提示 ────────────────────────────────────────────────
-function toast(msg, type = 'ok') {
-  const el = document.createElement('div');
-  el.style.cssText = `position:fixed;bottom:2rem;right:2rem;z-index:9999;
-    padding:10px 18px;border-radius:6px;font-size:13px;font-weight:500;
-    background:${type === 'err' ? '#ff4444' : '#c8ff00'};
-    color:${type === 'err' ? '#fff' : '#000'};
-    box-shadow:0 4px 20px rgba(0,0,0,.4);
-    animation:fadeUp .2s ease;`;
-  el.textContent = msg;
-  document.body.appendChild(el);
-  setTimeout(() => el.remove(), 3000);
+// ── Auth UI helper ────────────────────────────────────────────
+function applyAuthUI() {
+  document.body.classList.toggle('is-auth', SB.isLoggedIn());
 }
 
-// ── Auth state in sessionStorage (页面刷新保持登录) ──────────
-(function restoreSession() {
-  try {
-    const raw = sessionStorage.getItem('volta_session');
-    if (raw) {
-      const s = JSON.parse(raw);
-      // Re-inject so SB client knows we're logged in
-      SB.signIn.__restore = true;
-      // Use internal setter via a tiny hack
-      SB._restoreSession = s;
-      // Patch SB to accept restored session
-    }
-  } catch(e) {}
-})();
-
-// ── 持久化登录 session ─────────────────────────────────────────
-// 覆盖 SB 里的 _session 管理，使其跨页面刷新
-const _origSignIn = SB.signIn.bind(SB);
-SB.signIn = async function(email, password) {
-  const data = await _origSignIn(email, password);
-  try { sessionStorage.setItem('volta_session', JSON.stringify(data)); } catch(e) {}
-  return data;
-};
-const _origSignOut = SB.signOut.bind(SB);
-SB.signOut = function() {
-  _origSignOut();
-  sessionStorage.removeItem('volta_session');
-};
-
-// Restore on load
-(function() {
-  try {
-    const raw = sessionStorage.getItem('volta_session');
-    if (raw) {
-      const s = JSON.parse(raw);
-      // Directly inject into closure via re-calling with stored token
-      // Since we can't access _session directly, we monkey-patch getSession
-      const origGet = SB.getSession.bind(SB);
-      SB.getSession   = () => s;
-      SB.isLoggedIn   = () => !!s?.access_token;
-      // Also patch req headers by storing on object
-      SB._session_raw = s;
-      // Fix: patch the internal req by overriding headers getter
-      // Simpler: just store token and inject it via the fetch override below
-    }
-  } catch(e) {}
-})();
-
-// Ensure auth token is always sent if we have a stored session
-const _origFetch = window.fetch;
-window.fetch = function(input, init = {}) {
-  // Only inject for supabase REST calls
-  if (typeof input === 'string' && input.startsWith(CONFIG.supabase.url)) {
-    try {
-      const raw = sessionStorage.getItem('volta_session');
-      if (raw) {
-        const s = JSON.parse(raw);
-        if (s?.access_token) {
-          init.headers = {
-            ...(init.headers || {}),
-            'Authorization': 'Bearer ' + s.access_token,
-            'apikey': CONFIG.supabase.key,
-          };
-        }
-      }
-    } catch(e) {}
-  }
-  return _origFetch(input, init);
-};
-
-// Also keep SB.isLoggedIn accurate after restore
-(function() {
-  try {
-    const raw = sessionStorage.getItem('volta_session');
-    if (raw) {
-      const s = JSON.parse(raw);
-      if (s?.access_token) {
-        SB.isLoggedIn = () => true;
-        SB.getSession = () => s;
-      }
-    }
-  } catch(e) {}
-})();
-
-// ── 格式化日期 ────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────
 function formatDate(d) {
   if (!d) return '';
   const dt = new Date(d);
   return `${dt.getFullYear()}年${dt.getMonth()+1}月${dt.getDate()}日`;
 }
 
-// ── Color picker 组件 ─────────────────────────────────────────
+function esc(str) {
+  return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 const PROJ_COLORS = ['#7b61ff','#ff6b35','#c8ff00','#00d4ff','#ff3cac','#f5a623','#50fa7b'];
 
 function buildColorPicker(containerId, selected, onChange) {
   const el = document.getElementById(containerId);
   if (!el) return;
-  el.innerHTML = PROJ_COLORS.map(c => `
-    <div class="swatch ${c===selected?'on':''}" style="background:${c}" data-c="${c}"
-      onclick="pickColor(this,'${containerId}',event)"></div>
-  `).join('');
+  el.innerHTML = PROJ_COLORS.map(c =>
+    `<div class="swatch ${c===selected?'on':''}" style="background:${c}" data-c="${c}"
+      onclick="pickColor(this,'${containerId}',event)"></div>`
+  ).join('');
   el._onChange = onChange;
 }
 window.pickColor = function(el, containerId, e) {
@@ -314,3 +324,71 @@ window.pickColor = function(el, containerId, e) {
   const wrap = document.getElementById(containerId);
   wrap._onChange && wrap._onChange(el.dataset.c);
 };
+
+// ── Lightbox (shared) ─────────────────────────────────────────
+const LB = (() => {
+  let imgs = [], idx = 0;
+  let _el, _img, _prev, _next, _strip, _info, _title, _text, _tags;
+
+  function init() {
+    _el    = document.getElementById('lb');         if (!_el) return false;
+    _img   = document.getElementById('lbImg');
+    _prev  = document.getElementById('lbPrev');
+    _next  = document.getElementById('lbNext');
+    _strip = document.getElementById('lbStrip');
+    _info  = document.getElementById('lbInfo');
+    _title = document.getElementById('lbTitle');
+    _text  = document.getElementById('lbText');
+    _tags  = document.getElementById('lbTags');
+    _el.querySelector('.lb-backdrop')?.addEventListener('click', () => LB.close());
+    document.addEventListener('keydown', e => {
+      if (!_el?.classList.contains('open')) return;
+      if (e.key==='Escape')      LB.close();
+      if (e.key==='ArrowLeft')   LB.step(-1);
+      if (e.key==='ArrowRight')  LB.step(1);
+    });
+    return true;
+  }
+
+  function render() {
+    if (!_img) return;
+    _img.src = imgs[idx] || '';
+    if (_strip) {
+      _strip.style.display = imgs.length > 1 ? 'flex' : 'none';
+      if (imgs.length > 1)
+        _strip.innerHTML = imgs.map((u,i) =>
+          `<img src="${u}" class="${i===idx?'active':''}" onclick="LB.go(${i})" />`
+        ).join('');
+    }
+    if (_prev) _prev.style.display = idx === 0 ? 'none' : 'flex';
+    if (_next) _next.style.display = idx === imgs.length-1 ? 'none' : 'flex';
+  }
+
+  return {
+    open(imageList, startIdx, meta) {
+      if (!_el && !init()) return;
+      imgs = imageList || [];
+      idx  = startIdx  || 0;
+      if (_info) {
+        const hasInfo = meta && (meta.title || meta.content);
+        _info.style.display = hasInfo ? 'block' : 'none';
+        if (hasInfo) {
+          if (_title) _title.textContent = meta.title || '';
+          if (_text)  { _text.textContent = meta.content||''; _text.style.display = meta.content?'block':'none'; }
+          if (_tags)  _tags.innerHTML = (meta.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('');
+        }
+      }
+      _el.classList.add('open');
+      document.body.style.overflow = 'hidden';
+      render();
+    },
+    close() {
+      if (_el) _el.classList.remove('open');
+      document.body.style.overflow = '';
+      if (_img) _img.src = '';
+    },
+    go(i)   { idx = i; render(); },
+    step(d) { idx = Math.max(0, Math.min(imgs.length-1, idx+d)); render(); },
+  };
+})();
+window.LB = LB;
