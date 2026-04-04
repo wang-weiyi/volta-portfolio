@@ -3,11 +3,11 @@
 // ══════════════════════════════════════════════════════════════
 const CONFIG = {
   supabase: {
-    url: 'https://YOUR_PROJECT_ID.supabase.co',
-    key: 'YOUR_ANON_PUBLIC_KEY',
+    url: 'https://bbwgucxjmdrcyhebicwf.supabase.co',   // ← 替换
+    key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJid2d1Y3hqbWRyY3loZWJpY3dmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyMjIzNzAsImV4cCI6MjA5MDc5ODM3MH0.w4aWqwp6maBL9a9HTRqGlhRucRQJBTvBSvF7DI9YRrc',                   // ← 替换
   },
   cloudinary: {
-    cloudName:    'YOUR_CLOUD_NAME',
+    cloudName:    'dipaqqlxf',               // ← 替换
     uploadPreset: 'volta_uploads',
   }
 };
