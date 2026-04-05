@@ -26,8 +26,9 @@ out vec4 fragColor;
 uniform float u_time;
 uniform vec2  u_resolution;
 
-// 分形参数（对应截图值）
+// 分形参数
 uniform vec3  u_juliaC;        // (0.345, 0.557, 0)
+uniform vec2  u_juliaCOffset;  // 鼠标位移
 uniform vec3  u_rotAxis;       // (1, 0, 0)
 uniform float u_rotAngle;      // 45 * PI/180
 uniform float u_scale;         // 0.957
@@ -166,7 +167,7 @@ float sdf(vec3 pos) {
   }
 
   mat3 rot = rotAxisAngle(u_rotAngle, u_rotAxis);
-  vec3 j = u_juliaC;
+  vec3 j = u_juliaC + vec3(u_juliaCOffset, 0.0);
 
   for (int i = 0; i < 24; i++) {  // iter 上限硬编码，uniform 控制实际迭代次数
     if (i >= u_iter) break;
@@ -320,6 +321,8 @@ void main() {
   let gl, prog, canvas, raf;
   let startTime = 0;
   let uniforms = {};
+  let mouseOffset = [0, 0];
+  const MOUSE_STRENGTH = 0.285;
 
   function compileShader(gl, type, src) {
     const s = gl.createShader(type);
@@ -349,7 +352,7 @@ void main() {
   function cacheUniforms(gl, prog) {
     const names = [
       'u_time','u_resolution',
-      'u_juliaC','u_rotAxis','u_rotAngle','u_scale','u_bailout',
+      'u_juliaC','u_juliaCOffset','u_rotAxis','u_rotAngle','u_scale','u_bailout',
       'u_iter','u_inversion','u_rotateC',
       'u_uvScale','u_zPower','u_zOffset','u_zOffset2','u_proj',
       'u_lightDir','u_lightColor','u_ambientColor','u_materialColor',
@@ -366,7 +369,8 @@ void main() {
     gl.uniform2f(u.u_resolution, gl.drawingBufferWidth, gl.drawingBufferHeight);
 
     // 分形参数
-    gl.uniform3f(u.u_juliaC,   0.345, 0.557, 0.0);
+    gl.uniform3f(u.u_juliaC,        0.345, 0.557, 0.0);
+    gl.uniform2f(u.u_juliaCOffset,  mouseOffset[0], mouseOffset[1]);
     gl.uniform3f(u.u_rotAxis,  1.0,   0.0,   0.0);
     gl.uniform1f(u.u_rotAngle, 45.0 * Math.PI / 180.0);
     gl.uniform1f(u.u_scale,    0.957);
@@ -397,7 +401,7 @@ void main() {
   function resize() {
     if (!canvas) return;
     // 降采样 0.5 以保持性能（分形 SDF 计算量大）
-    const dpr = Math.min(window.devicePixelRatio, 1.5) * 0.5;
+    const dpr = Math.min(window.devicePixelRatio, 2.0) * 0.525;
     canvas.width  = Math.floor(window.innerWidth  * dpr);
     canvas.height = Math.floor(window.innerHeight * dpr);
     canvas.style.width  = window.innerWidth  + 'px';
@@ -434,6 +438,16 @@ void main() {
 
       resize();
       window.addEventListener('resize', resize);
+
+      canvas.addEventListener('mousemove', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        mouseOffset[0] = ((e.clientX - rect.left)  / rect.width  - 0.5) * MOUSE_STRENGTH;
+        mouseOffset[1] = ((e.clientY - rect.top)   / rect.height - 0.5) * MOUSE_STRENGTH;
+      });
+      canvas.addEventListener('mouseleave', () => {
+        mouseOffset[0] = 0;
+        mouseOffset[1] = 0;
+      });
 
       startTime = performance.now();
       raf = requestAnimationFrame(render);
