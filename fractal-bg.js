@@ -93,19 +93,60 @@ vec3 applyTransform(vec3 pos) {
   return pos + u_proj * (npos - pos);
 }
 
+// ── 变换的解析雅可比矩阵 ────────────────────────────────────────
+// T(pos) = pos + proj*(F(pos)-pos)，J_T = I + proj*(J_F - I)
+// F = equirectangularInverse，对 pos 解析求偏导
+mat3 computeTransformJacobian(vec3 pos) {
+  float absZ = abs(pos.z);
+  float signZ = sign(pos.z);
+
+  // 计算 r 及 dr/dz（sign(z)*zOffset 为常数项，导数为 0）
+  float r = (absZ > 1e-6 ? signZ * pow(absZ, u_zPower) : 0.0)
+            + signZ * u_zOffset + u_zOffset2;
+  float useR;
+  float dr_dz;
+  if (r != 0.0) {
+    useR  = r;
+    dr_dz = (absZ > 1e-6) ? u_zPower * pow(absZ, u_zPower - 1.0) : 0.0;
+  } else {
+    // equirectangularInverse 退化为使用 planarPos.z
+    useR  = pos.z;
+    dr_dz = 1.0;
+  }
+
+  float lon    = pos.x / u_uvScale;
+  float lat    = pos.y / u_uvScale;
+  float cosLat = cos(lat), sinLat = sin(lat);
+  float cosLon = cos(lon), sinLon = sin(lon);
+  float invS   = 1.0 / u_uvScale;
+
+  // J_F（GLSL mat3 列主序，每个 vec3 是一列）
+  // col j = ∂F/∂pos_j
+  mat3 JF = mat3(
+    // col0: ∂F/∂pos.x
+    vec3( useR * cosLat * cosLon * invS,
+          0.0,
+         -useR * cosLat * sinLon * invS),
+    // col1: ∂F/∂pos.y
+    vec3(-useR * sinLat * sinLon * invS,
+          useR * cosLat * invS,
+         -useR * sinLat * cosLon * invS),
+    // col2: ∂F/∂pos.z
+    vec3( cosLat * sinLon * dr_dz,
+          sinLat * dr_dz,
+          cosLat * cosLon * dr_dz)
+  );
+
+  return mat3(1.0) + u_proj * (JF - mat3(1.0));
+}
+
 // ── SDF ────────────────────────────────────────────────────────
 float sdf(vec3 pos) {
   // 变换
   vec3 tp = applyTransform(pos);
 
-  // 变换的雅可比矩阵（有限差分近似，避免解析推导的复杂度）
-  // 注意：精确雅可比在 OpenCL 版本里是解析的，这里用数值近似
-  // 对于距离估计已经足够精确
-  float eps = 0.001;
-  mat3 Jt;
-  Jt[0] = (applyTransform(pos + vec3(eps,0,0)) - applyTransform(pos - vec3(eps,0,0))) / (2.0*eps);
-  Jt[1] = (applyTransform(pos + vec3(0,eps,0)) - applyTransform(pos - vec3(0,eps,0))) / (2.0*eps);
-  Jt[2] = (applyTransform(pos + vec3(0,0,eps)) - applyTransform(pos - vec3(0,0,eps))) / (2.0*eps);
+  // 变换的解析雅可比矩阵
+  mat3 Jt = computeTransformJacobian(pos);
 
   vec3 z;
   mat3 D;
@@ -224,9 +265,10 @@ void main() {
   // 相机设置
   vec3 ro = u_camPos;
   // 构建相机坐标系
-  vec3 target = vec3(0.0);
+  vec3 target = vec3(7.9, 0.0, 1.55);
   vec3 fwd = normalize(target - ro);
-  vec3 right = normalize(cross(vec3(0,1,0), fwd));
+  vec3 worldUp = abs(fwd.y) < 0.99 ? vec3(0,1,0) : vec3(0,0,1);
+  vec3 right = normalize(cross(worldUp, fwd));
   vec3 up = cross(fwd, right);
 
   // 屏幕空间 → 光线方向（透视投影）
@@ -323,7 +365,7 @@ void main() {
     gl.uniform1f(u.u_time, t);
     gl.uniform2f(u.u_resolution, gl.drawingBufferWidth, gl.drawingBufferHeight);
 
-    // 分形参数（截图值）
+    // 分形参数
     gl.uniform3f(u.u_juliaC,   0.345, 0.557, 0.0);
     gl.uniform3f(u.u_rotAxis,  1.0,   0.0,   0.0);
     gl.uniform1f(u.u_rotAngle, 45.0 * Math.PI / 180.0);
@@ -339,21 +381,16 @@ void main() {
     gl.uniform1f(u.u_proj,     1.0);
 
     // 光照
-    // 轻微随时间旋转光源，增加动感
-    const lt = t * 0.08;
-    gl.uniform3f(u.u_lightDir,  Math.sin(lt), -0.6, Math.cos(lt));
-    gl.uniform3f(u.u_lightColor,          1.0, 1.0, 1.0);
-    gl.uniform3f(u.u_ambientColor,        0.3, 0.3, 0.3);
-    gl.uniform3f(u.u_materialColor,       0.9, 0.9, 0.9);
-    gl.uniform1f(u.u_shininess,           10.0);
-    gl.uniform1f(u.u_ambientStrength,     0.3);
-    gl.uniform1f(u.u_specularStrength,    1.0);
+    gl.uniform3f(u.u_lightDir,         -0.69, -0.23, -0.2);
+    gl.uniform3f(u.u_lightColor,        1.0,   1.0,   1.0);
+    gl.uniform3f(u.u_ambientColor,      0.3,   0.3,   0.3);
+    gl.uniform3f(u.u_materialColor,     0.9,   0.9,   0.9);
+    gl.uniform1f(u.u_shininess,         93.0);
+    gl.uniform1f(u.u_ambientStrength,   0.39);
+    gl.uniform1f(u.u_specularStrength,  2.76);
 
-    // 相机：绕分形缓慢旋转
-    const ct = t * 0.04;
-    const camR = 4.5;
-    const camY = 1.5 + Math.sin(t * 0.025) * 0.5;
-    gl.uniform3f(u.u_camPos, camR * Math.sin(ct), camY, camR * Math.cos(ct));
+    // 相机（固定位置）
+    gl.uniform3f(u.u_camPos, 6.1788, 1.4962, 5.7053);
     gl.uniform1f(u.u_fov, 60.0 * Math.PI / 180.0);
   }
 
