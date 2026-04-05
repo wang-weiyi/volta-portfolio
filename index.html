@@ -6,9 +6,12 @@
 <link rel="stylesheet" href="style.css">
 <style>
 .hero{min-height:100vh;display:flex;flex-direction:column;justify-content:flex-end;padding:2rem;padding-top:60px;position:relative;overflow:hidden}
-.hero-glow{position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse 55% 55% at 75% 35%,rgba(123,97,255,.07) 0%,transparent 65%),radial-gradient(ellipse 40% 40% at 25% 75%,rgba(200,255,0,.04) 0%,transparent 60%)}
-.hero-grid{position:absolute;inset:0;pointer-events:none;background-image:linear-gradient(rgba(255,255,255,.032) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.032) 1px,transparent 1px);background-size:72px 72px;mask-image:radial-gradient(ellipse 90% 90% at 60% 40%,black 10%,transparent 75%)}
-.hero-content{position:relative;z-index:1;max-width:1280px;margin:0 auto;width:100%}
+/* 分形 canvas 全屏背景 */
+#fractalCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:0;display:block}
+/* 分形上方叠一层渐变，让文字可读 */
+.hero-overlay{position:absolute;inset:0;z-index:1;pointer-events:none;
+  background:linear-gradient(to top,rgba(8,8,8,.92) 0%,rgba(8,8,8,.4) 40%,rgba(8,8,8,.15) 100%)}
+.hero-content{position:relative;z-index:2;max-width:1280px;margin:0 auto;width:100%}
 .hero-eyebrow{display:flex;align-items:center;gap:10px;margin-bottom:1.5rem;font-size:11px;font-weight:600;letter-spacing:.22em;text-transform:uppercase;color:var(--acc)}
 .hero-eyebrow::before{content:'';width:28px;height:1px;background:currentColor}
 .hero-title{font-family:var(--fh);font-size:clamp(3.5rem,9vw,8rem);font-weight:800;line-height:.92;letter-spacing:-3px;margin-bottom:2rem}
@@ -78,7 +81,8 @@
 </nav>
 
 <section class="hero">
-  <div class="hero-glow"></div><div class="hero-grid"></div>
+  <canvas id="fractalCanvas"></canvas>
+  <div class="hero-overlay"></div>
   <div class="hero-content">
     <div class="hero-eyebrow">3D 数字艺术家</div>
     <h1 class="hero-title">造<span class="dim">型</span><br><span class="out">即</span>思<span class="dim">考</span></h1>
@@ -255,7 +259,10 @@
 </div>
 
 <script src="app.js"></script>
+<script src="fractal-bg.js"></script>
 <script>
+// 启动分形背景（WebGL2 不支持时静默降级为纯色背景）
+FractalBG.init('fractalCanvas');
 const CAT_COLORS={'建筑':'#7b61ff','角色':'#ff6b35','环境':'#c8ff00','抽象':'#00d4ff','产品':'#ff3cac'};
 let _filter='all', _projects=[], _postMap=new Map();
 let pmColor=PROJ_COLORS[0];
