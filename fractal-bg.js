@@ -409,13 +409,15 @@ void main() {
     if (gl) gl.viewport(0, 0, canvas.width, canvas.height);
   }
 
+  let isActive = false;
+
   function render(ts) {
     if (!gl || !prog) return;
     const t = (ts - startTime) / 1000.0;
     gl.useProgram(prog);
     setUniforms(gl, uniforms, t);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    raf = requestAnimationFrame(render);
+    if (isActive) raf = requestAnimationFrame(render);
   }
 
   // ── 公开 API ───────────────────────────────────────────────
@@ -439,6 +441,12 @@ void main() {
       resize();
       window.addEventListener('resize', resize);
 
+      canvas.addEventListener('mouseenter', () => {
+        if (!isActive) {
+          isActive = true;
+          raf = requestAnimationFrame(render);
+        }
+      });
       canvas.addEventListener('mousemove', (e) => {
         const rect = canvas.getBoundingClientRect();
         mouseOffset[0] = ((e.clientX - rect.left)  / rect.width  - 0.5) * MOUSE_STRENGTH;
@@ -447,10 +455,12 @@ void main() {
       canvas.addEventListener('mouseleave', () => {
         mouseOffset[0] = 0;
         mouseOffset[1] = 0;
+        isActive = false;
+        if (raf) { cancelAnimationFrame(raf); raf = null; }
       });
 
       startTime = performance.now();
-      raf = requestAnimationFrame(render);
+      // 初始不自动渲染，等待鼠标进入
       return true;
     },
 
