@@ -286,7 +286,7 @@ void main() {
 
   for (int i = 0; i < 300; i++) {
     float dist = sdf(raypos);
-    if (dist < 0.0001) { hit = true; break; }
+    if (dist < 0.00001) { hit = true; break; }
     if (length(raypos - ro) > 60.0) break;
     raypos += dist * rd;
   }
