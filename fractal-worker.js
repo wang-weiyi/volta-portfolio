@@ -282,16 +282,17 @@ let isTransitioning = false;
 let transitionTimer = null;
 let debounceTimer = null;
 let canvas = null;
-let renderGen = 0; // Cancellation token: incremented on each new render request
+let renderGen = 0; // Cancellation token
 
 const MOUSE_STRENGTH = 0.285;
 const DEBOUNCE_MS    = 350;
 const TRANSITION_MS  = 900;
 
-// ── NEW: Fixed idle time and tiny initial batches for absolute smoothness ──
-const FIXED_IDLE_MS   = 16;    // 16ms = one frame, guarantees UI gets GPU time
-const TARGET_BATCH_MS = 4;     // target each batch to take ~4ms (tiny)
-const MIN_ROWS        = 1;     // start with 1 row, adapt upward if too fast
+// ── Tile-based rendering parameters ───────────────────────────────────────
+let TILE_SIZE = 32;           // start with 32x32 pixels per tile
+const MIN_TILE_SIZE = 8;      // never go below 8x8
+const TARGET_TILE_MS = 2.0;   // aim for each tile < 2ms GPU time
+const IDLE_MS_PER_TILE = 8;   // force idle 8ms after each tile
 
 // ── GL helpers ─────────────────────────────────────────────────────────────
 function compileShader(g, type, src) {
@@ -380,6 +381,7 @@ function setFractalUniforms(g, u, offset) {
 
 // ── Display (transition) rendering ────────────────────────────────────────
 function drawDisplay(t) {
+  if (!gl) return;
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.viewport(0, 0, canvas.width, canvas.height);
   gl.useProgram(displayProg);
@@ -418,10 +420,14 @@ function abortCurrentRender() {
     clearTimeout(transitionTimer);
     transitionTimer = null;
   }
-  isTransitioning = false;
+  if (isTransitioning) {
+    isTransitioning = false;
+    // Immediately show the base frame (fboA) without transition
+    drawDisplay(0.0);
+  }
 }
 
-// ── Adaptive tiled fractal render with fixed idle time ────────────────────
+// ── Tile-based fractal render ─────────────────────────────────────────────
 async function renderFractalToFBO(offset) {
   const w = canvas.width, h = canvas.height;
   const gen = ++renderGen;
@@ -442,45 +448,48 @@ async function renderFractalToFBO(offset) {
   gl.useProgram(fractalProg);
   setFractalUniforms(gl, fractalUniforms, offset);
 
-  // Start with 1 row to guarantee tiny GPU time
-  let rowsPerBatch = MIN_ROWS;
-  let row = 0;
+  // Dynamic tile size: start from last known good size
+  let tileSize = TILE_SIZE;
+  // Iterate over tiles in row-major order
+  for (let y = 0; y < h; y += tileSize) {
+    for (let x = 0; x < w; x += tileSize) {
+      if (gen !== renderGen) return;   // cancelled
 
-  while (row < h) {
-    if (gen !== renderGen) return;   // cancelled by new request
+      const tileW = Math.min(tileSize, w - x);
+      const tileH = Math.min(tileSize, h - y);
+      if (tileW <= 0 || tileH <= 0) continue;
 
-    const batchH = Math.min(rowsPerBatch, h - row);
+      // Set scissor to the tile rectangle
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
+      gl.viewport(0, 0, w, h);
+      gl.enable(gl.SCISSOR_TEST);
+      gl.scissor(x, y, tileW, tileH);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.disable(gl.SCISSOR_TEST);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
-    gl.viewport(0, 0, w, h);
-    gl.enable(gl.SCISSOR_TEST);
-    gl.scissor(0, row, w, batchH);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-    gl.disable(gl.SCISSOR_TEST);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      // Measure GPU time for this tile
+      const t0 = performance.now();
+      gl.finish();
+      const gpuMs = performance.now() - t0;
 
-    // Measure GPU time for this batch
-    const t0 = performance.now();
-    gl.finish();
-    const gpuMs = performance.now() - t0;
+      // Adapt tile size to keep GPU time under TARGET_TILE_MS
+      if (gpuMs > TARGET_TILE_MS * 1.2 && tileSize > MIN_TILE_SIZE) {
+        tileSize = Math.max(MIN_TILE_SIZE, Math.floor(tileSize * 0.8));
+      } else if (gpuMs < TARGET_TILE_MS * 0.6 && tileSize < 128) {
+        tileSize = Math.min(128, Math.ceil(tileSize * 1.2));
+      }
+      TILE_SIZE = tileSize;  // remember for next render
 
-    // Adapt batch height to keep each batch near TARGET_BATCH_MS
-    if (gpuMs > TARGET_BATCH_MS * 1.5 && rowsPerBatch > MIN_ROWS) {
-      rowsPerBatch = Math.max(MIN_ROWS, Math.floor(rowsPerBatch * 0.7));
-    } else if (gpuMs < TARGET_BATCH_MS * 0.5) {
-      rowsPerBatch = Math.min(h, Math.ceil(rowsPerBatch * 1.5));
+      // Force idle to let browser compositor work
+      await new Promise(resolve => setTimeout(resolve, IDLE_MS_PER_TILE));
     }
-
-    // Force idle for a full frame to let compositor work
-    await new Promise(resolve => setTimeout(resolve, FIXED_IDLE_MS));
-
-    row += batchH;
   }
 
   if (gen !== renderGen) return;
 
   if (!fboAValid) {
-    // First frame: copy fboB -> fboA, show immediately without transition
+    // First frame: copy fboB -> fboA, show immediately
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fboB.fbo);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, fboA.fbo);
     gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
@@ -492,7 +501,7 @@ async function renderFractalToFBO(offset) {
     return;
   }
 
-  // All batches done — start pixel-sort transition
+  // All tiles done — start transition
   isTransitioning = true;
   transitionStart = performance.now();
   startTransitionLoop();
@@ -524,7 +533,7 @@ self.addEventListener('message', (e) => {
 
   } else if (type === 'resize') {
     if (!canvas) return;
-    abortCurrentRender();               // stop any ongoing render
+    abortCurrentRender();
     canvas.width  = e.data.w;
     canvas.height = e.data.h;
     if (gl) gl.viewport(0, 0, e.data.w, e.data.h);
@@ -534,7 +543,7 @@ self.addEventListener('message', (e) => {
     if (!fboAValid) renderFractalToFBO([0, 0]);
 
   } else if (type === 'mousemove') {
-    abortCurrentRender();               // immediate GPU release on mouse move
+    abortCurrentRender();   // instantly stop all GPU work and transitions
     pendingOffset[0] = (e.data.nx - 0.5) * MOUSE_STRENGTH;
     pendingOffset[1] = (e.data.ny - 0.5) * MOUSE_STRENGTH;
     clearTimeout(debounceTimer);
