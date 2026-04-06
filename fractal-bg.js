@@ -28,7 +28,7 @@ const FractalBG = (() => {
         return false;
       }
 
-      // 把 canvas 控制权完整转移给 worker
+      // 把 canvas 控制权完整转移给 worker（主线程之后无法再操作其渲染上下文）
       const offscreen = canvas.transferControlToOffscreen();
       const [w, h] = getDrawSize();
 
@@ -47,29 +47,22 @@ const FractalBG = (() => {
         worker.postMessage({ type: 'resize', w: nw, h: nh });
       });
 
-      // ── 鼠标事件：加一个简单的节流，避免高频消息 ──
-      let pendingMove = false;
+      // ── 鼠标事件：只算归一化坐标，发消息，不做任何 GL 操作 ──
       canvas.addEventListener('mouseenter', () => {
         worker.postMessage({ type: 'mouseenter' });
       });
 
       canvas.addEventListener('mousemove', (e) => {
-        if (pendingMove) return;
-        pendingMove = true;
-        requestAnimationFrame(() => {
-          const rect = canvas.getBoundingClientRect();
-          worker.postMessage({
-            type: 'mousemove',
-            nx: (e.clientX - rect.left) / rect.width,
-            ny: (e.clientY - rect.top)  / rect.height,
-          });
-          pendingMove = false;
+        const rect = canvas.getBoundingClientRect();
+        worker.postMessage({
+          type: 'mousemove',
+          nx: (e.clientX - rect.left) / rect.width,
+          ny: (e.clientY - rect.top)  / rect.height,
         });
       });
 
       canvas.addEventListener('mouseleave', () => {
         worker.postMessage({ type: 'mouseleave' });
-        pendingMove = false;
       });
 
       return true;

@@ -10,7 +10,7 @@ void main(){
   vUv = (pos[gl_VertexID] + 1.0) * 0.5;
 }`;
 
-// ── Fractal fragment shader (完全不变) ────────────────────────────────────
+// ── Fractal fragment shader ────────────────────────────────────────────────
 const FRAG_SRC = `#version 300 es
 precision highp float;
 
@@ -231,7 +231,7 @@ void main() {
   fragColor = vec4(col, 1.0);
 }`;
 
-// ── Pixel-sort transition shader (不变) ───────────────────────────────────
+// ── Pixel-sort transition shader ───────────────────────────────────────────
 const DISPLAY_FRAG_SRC = `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -282,14 +282,15 @@ let isTransitioning = false;
 let transitionTimer = null;
 let debounceTimer = null;
 let canvas = null;
-let renderGen = 0; // Cancellation token
+let renderGen = 0; // Cancellation token: incremented on each new render request
 
 const MOUSE_STRENGTH = 0.285;
 const DEBOUNCE_MS    = 350;
 const TRANSITION_MS  = 900;
 
-// Tile size – keep it small to yield frequently
-const TILE_SIZE = 64;
+// GPU budget per tile: once drawArrays starts, GPU is non-preemptible.
+// This is the max compositor stall per tile. Must be < 1 vsync (16ms).
+const TARGET_GPU_MS = 4;
 
 // ── GL helpers ─────────────────────────────────────────────────────────────
 function compileShader(g, type, src) {
@@ -392,7 +393,7 @@ function drawDisplay(t) {
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 }
 
-// Transition loop using requestAnimationFrame (smooth and non‑blocking)
+// Transition loop: runs AFTER gl.finish() so GPU is free; each frame is fast.
 function startTransitionLoop() {
   if (transitionTimer !== null) return;
   function tick() {
@@ -402,16 +403,26 @@ function startTransitionLoop() {
     if (t >= 1.0) {
       isTransitioning = false;
       transitionTimer = null;
-      // Swap buffers after transition finishes
       const tmp = fboA; fboA = fboB; fboB = tmp;
     } else {
-      transitionTimer = requestAnimationFrame(tick);
+      transitionTimer = setTimeout(tick, 16);
     }
   }
-  transitionTimer = requestAnimationFrame(tick);
+  transitionTimer = setTimeout(tick, 16);
 }
 
-// ── Adaptive tiled fractal render – NO gl.finish(), always yield ──────────
+// ── Adaptive tiled fractal render ─────────────────────────────────────────
+// Key insight: gl.finish() blocks ONLY the worker thread, not the main thread
+// or compositor. By measuring actual GPU time per batch and keeping it under
+// TARGET_GPU_MS, the compositor always gets GPU access within one batch window.
+//
+// Flow per batch:
+//   drawArrays (submit to GPU) → gl.finish() (worker waits; GPU executes)
+//   → setTimeout(0) (yield worker event loop; compositor gets GPU window)
+//   → next batch
+//
+// Batch height adapts: if GPU took too long → fewer rows; too fast → more rows.
+
 async function renderFractalToFBO(offset) {
   const w = canvas.width, h = canvas.height;
   const gen = ++renderGen;
@@ -424,7 +435,7 @@ async function renderFractalToFBO(offset) {
 
   if (isTransitioning) {
     isTransitioning = false;
-    if (transitionTimer) cancelAnimationFrame(transitionTimer);
+    clearTimeout(transitionTimer);
     transitionTimer = null;
     const tmp = fboA; fboA = fboB; fboB = tmp;
   }
@@ -432,34 +443,69 @@ async function renderFractalToFBO(offset) {
   gl.useProgram(fractalProg);
   setFractalUniforms(gl, fractalUniforms, offset, w, h);
 
-  gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
-  gl.viewport(0, 0, w, h);
+  // ── Adaptive tile-based rendering ──────────────────────────
+  // Row-based batching fails when even 1 full-width row exceeds the GPU
+  // budget (e.g. 3840px × heavy shader > 16ms). Tiles cut BOTH dimensions,
+  // so a 64×64 tile = 4096 fragments — small enough for <4ms on most GPUs.
+  //
+  // Tile side length adapts: after each tile we measure actual GPU time,
+  // compute ms-per-pixel, and resize to hit TARGET_GPU_MS.
 
-  for (let y = 0; y < h; y += TILE_SIZE) {
-    for (let x = 0; x < w; x += TILE_SIZE) {
-      if (gen !== renderGen) return; // cancelled
+  let tileSide = 64; // starting guess; adapts after first measurement
 
-      const tw = Math.min(TILE_SIZE, w - x);
-      const th = Math.min(TILE_SIZE, h - y);
+  for (let y = 0; y < h;) {
+    for (let x = 0; x < w;) {
+      if (gen !== renderGen) return; // newer request — abort
 
+      const tw = Math.min(tileSide, w - x);
+      const th = Math.min(tileSide, h - y);
+
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
+      gl.viewport(0, 0, w, h);
       gl.enable(gl.SCISSOR_TEST);
       gl.scissor(x, y, tw, th);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.disable(gl.SCISSOR_TEST);
-      
-      // ★ No gl.finish() – only flush to submit commands
-      gl.flush();
-      
-      // Yield control – allows UI compositor to run
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+      // gl.finish() blocks worker only; measures real GPU time for this tile
+      const t0 = performance.now();
+      gl.finish();
+      const gpuMs = performance.now() - t0;
+
+      // Adapt tile size based on measured cost per pixel
+      const pixels = tw * th;
+      if (gpuMs > 0.01) {
+        const msPerPx    = gpuMs / pixels;
+        const wantPixels = TARGET_GPU_MS / msPerPx;
+        const wantSide   = Math.sqrt(wantPixels);
+        // Smooth adjustment: blend 60% toward target to avoid oscillation
+        tileSide = Math.max(16, Math.min(256,
+          Math.round(tileSide * 0.4 + wantSide * 0.6)));
+      }
+
+      x += tw;
+
+      // Yield after every tile: compositor gets a GPU-free window
       await new Promise(r => setTimeout(r, 0));
     }
+    y += tileSide; // use current (adapted) tileSide for next row of tiles
   }
 
   if (gen !== renderGen) return;
 
-  // Rendering complete – swap buffers and start transition
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  fboAValid = true;
+  if (!fboAValid) {
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fboB.fbo);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, fboA.fbo);
+    gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+    fboAValid = true;
+    const tmp = fboA; fboA = fboB; fboB = tmp;
+    drawDisplay(0.0);
+    return;
+  }
+
   isTransitioning = true;
   transitionStart = performance.now();
   startTransitionLoop();
@@ -495,7 +541,7 @@ self.addEventListener('message', (e) => {
     canvas.height = e.data.h;
     if (gl) gl.viewport(0, 0, e.data.w, e.data.h);
     fboAValid = false;
-    renderGen++; // Cancel any in-progress render
+    renderGen++; // Cancel any in-progress tiled render
 
   } else if (type === 'mouseenter') {
     if (!fboAValid) renderFractalToFBO([0, 0]);
