@@ -317,39 +317,108 @@ void main() {
   fragColor = vec4(col, 1.0);
 }`;
 
-  // ── 内部状态 ───────────────────────────────────────────────
-  let gl, prog, canvas, raf;
-  let startTime = 0;
-  let uniforms = {};
-  let mouseOffset = [0, 0];
-  const MOUSE_STRENGTH = 0.285;
+  // ── 过渡动画显示着色器 ─────────────────────────────────────
+  // 基于 tile hash 的随机散开溶解，tile 边缘带蓝色闪光
+  const DISPLAY_FRAG_SRC = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 fragColor;
 
-  function compileShader(gl, type, src) {
-    const s = gl.createShader(type);
-    gl.shaderSource(s, src);
-    gl.compileShader(s);
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
-      console.error('Shader error:', gl.getShaderInfoLog(s));
+uniform sampler2D u_texA;      // 当前帧（旧）
+uniform sampler2D u_texB;      // 目标帧（新）
+uniform float     u_transition; // 0=全A, 1=全B
+uniform vec2      u_resolution;
+
+float hash(vec2 p) {
+  p = fract(p * vec2(127.34, 311.72));
+  p += dot(p, p + 45.32);
+  return fract(p.x * p.y);
+}
+
+void main() {
+  vec2 uv = vUv;
+
+  // 快捷路径：过渡未开始或已结束
+  if (u_transition <= 0.0) { fragColor = texture(u_texA, uv); return; }
+  if (u_transition >= 1.0) { fragColor = texture(u_texB, uv); return; }
+
+  // 每个 tile(20px) 有独立的随机延迟
+  vec2 tileCoord = floor(gl_FragCoord.xy / 20.0);
+  float delay  = hash(tileCoord);          // [0, 1]
+  float tStart = delay * 0.55;
+  float tEnd   = tStart + 0.45;
+  float localT = clamp((u_transition - tStart) / (tEnd - tStart), 0.0, 1.0);
+  localT = smoothstep(0.0, 1.0, localT);
+
+  vec4 colA = texture(u_texA, uv);
+  vec4 colB = texture(u_texB, uv);
+
+  // tile 切换瞬间的蓝色闪光
+  float flash = exp(-pow((localT - 0.5) * 7.0, 2.0)) * 0.14;
+  vec4 col = mix(colA, colB, localT);
+  col.rgb += flash * vec3(0.35, 0.6, 1.0);
+  col.rgb  = clamp(col.rgb, 0.0, 1.0);
+  fragColor = col;
+}`;
+
+  // ── 内部状态 ───────────────────────────────────────────────
+  let gl, fractalProg, displayProg, canvas, raf;
+  let fractalUniforms = {}, displayUniforms = {};
+  let fboA = null, fboB = null;   // { fbo, tex }
+  let fboAValid = false;          // fboA 是否已有有效内容
+  let pendingOffset = [0, 0];     // 下次渲染用的 juliaC 偏移
+  let transitionStart = 0;
+  let isTransitioning = false;
+  let debounceTimer = null;
+  const MOUSE_STRENGTH  = 0.285;
+  const DEBOUNCE_MS     = 350;
+  const TRANSITION_MS   = 900;
+
+  // ── GL 工具 ────────────────────────────────────────────────
+  function compileShader(g, type, src) {
+    const s = g.createShader(type);
+    g.shaderSource(s, src);
+    g.compileShader(s);
+    if (!g.getShaderParameter(s, g.COMPILE_STATUS)) {
+      console.error('Shader error:', g.getShaderInfoLog(s));
       return null;
     }
     return s;
   }
 
-  function buildProgram(gl) {
-    const vs = compileShader(gl, gl.VERTEX_SHADER,   VERT_SRC);
-    const fs = compileShader(gl, gl.FRAGMENT_SHADER, FRAG_SRC);
+  function buildProgram(g, fSrc) {
+    const vs = compileShader(g, g.VERTEX_SHADER, VERT_SRC);
+    const fs = compileShader(g, g.FRAGMENT_SHADER, fSrc);
     if (!vs || !fs) return null;
-    const p = gl.createProgram();
-    gl.attachShader(p, vs); gl.attachShader(p, fs);
-    gl.linkProgram(p);
-    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
-      console.error('Link error:', gl.getProgramInfoLog(p));
+    const p = g.createProgram();
+    g.attachShader(p, vs); g.attachShader(p, fs);
+    g.linkProgram(p);
+    if (!g.getProgramParameter(p, g.LINK_STATUS)) {
+      console.error('Link error:', g.getProgramInfoLog(p));
       return null;
     }
     return p;
   }
 
-  function cacheUniforms(gl, prog) {
+  // 创建 RGBA FBO + 纹理
+  function makeFBO(g, w, h) {
+    const tex = g.createTexture();
+    g.bindTexture(g.TEXTURE_2D, tex);
+    g.texImage2D(g.TEXTURE_2D, 0, g.RGBA8, w, h, 0, g.RGBA, g.UNSIGNED_BYTE, null);
+    g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MIN_FILTER, g.LINEAR);
+    g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MAG_FILTER, g.LINEAR);
+    g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_S, g.CLAMP_TO_EDGE);
+    g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_T, g.CLAMP_TO_EDGE);
+    const fbo = g.createFramebuffer();
+    g.bindFramebuffer(g.FRAMEBUFFER, fbo);
+    g.framebufferTexture2D(g.FRAMEBUFFER, g.COLOR_ATTACHMENT0, g.TEXTURE_2D, tex, 0);
+    g.bindFramebuffer(g.FRAMEBUFFER, null);
+    g.bindTexture(g.TEXTURE_2D, null);
+    return { fbo, tex, w, h };
+  }
+
+  // ── 分形 uniforms ──────────────────────────────────────────
+  function cacheFractalUniforms(g, p) {
     const names = [
       'u_time','u_resolution',
       'u_juliaC','u_juliaCOffset','u_rotAxis','u_rotAngle','u_scale','u_bailout',
@@ -360,117 +429,196 @@ void main() {
       'u_camPos','u_fov',
     ];
     const out = {};
-    for (const n of names) out[n] = gl.getUniformLocation(prog, n);
+    for (const n of names) out[n] = g.getUniformLocation(p, n);
     return out;
   }
 
-  function setUniforms(gl, u, t) {
-    gl.uniform1f(u.u_time, t);
-    gl.uniform2f(u.u_resolution, gl.drawingBufferWidth, gl.drawingBufferHeight);
+  function setFractalUniforms(g, u, offset) {
+    g.uniform1f(u.u_time, 0.0);
+    g.uniform2f(u.u_resolution, g.drawingBufferWidth, g.drawingBufferHeight);
+    g.uniform3f(u.u_juliaC,        0.345, 0.557, 0.0);
+    g.uniform2f(u.u_juliaCOffset,  offset[0], offset[1]);
+    g.uniform3f(u.u_rotAxis,       1.0, 0.0, 0.0);
+    g.uniform1f(u.u_rotAngle,      45.0 * Math.PI / 180.0);
+    g.uniform1f(u.u_scale,         0.957);
+    g.uniform1f(u.u_bailout,       3000.0);
+    g.uniform1i(u.u_iter,          24);
+    g.uniform1i(u.u_inversion,     0);
+    g.uniform1i(u.u_rotateC,       0);
+    g.uniform1f(u.u_uvScale,       2.5);
+    g.uniform1f(u.u_zPower,        1.0);
+    g.uniform1f(u.u_zOffset,       0.0);
+    g.uniform1f(u.u_zOffset2,      0.0);
+    g.uniform1f(u.u_proj,          1.0);
+    g.uniform3f(u.u_lightDir,      -0.69, -0.23, -0.2);
+    g.uniform3f(u.u_lightColor,     1.0,   1.0,   1.0);
+    g.uniform3f(u.u_ambientColor,   0.3,   0.3,   0.3);
+    g.uniform3f(u.u_materialColor,  0.9,   0.9,   0.9);
+    g.uniform1f(u.u_shininess,      93.0);
+    g.uniform1f(u.u_ambientStrength, 0.39);
+    g.uniform1f(u.u_specularStrength, 2.76);
+    g.uniform3f(u.u_camPos,         6.1788, 1.4962, 5.7053);
+    g.uniform1f(u.u_fov,            60.0 * Math.PI / 180.0);
+  }
 
-    // 分形参数
-    gl.uniform3f(u.u_juliaC,        0.345, 0.557, 0.0);
-    gl.uniform2f(u.u_juliaCOffset,  mouseOffset[0], mouseOffset[1]);
-    gl.uniform3f(u.u_rotAxis,  1.0,   0.0,   0.0);
-    gl.uniform1f(u.u_rotAngle, 45.0 * Math.PI / 180.0);
-    gl.uniform1f(u.u_scale,    0.957);
-    gl.uniform1f(u.u_bailout,  3000.0);
-    gl.uniform1i(u.u_iter,     24);
-    gl.uniform1i(u.u_inversion,0);
-    gl.uniform1i(u.u_rotateC,  0);
-    gl.uniform1f(u.u_uvScale,  2.5);
-    gl.uniform1f(u.u_zPower,   1.0);
-    gl.uniform1f(u.u_zOffset,  0.0);
-    gl.uniform1f(u.u_zOffset2, 0.0);
-    gl.uniform1f(u.u_proj,     1.0);
-
-    // 光照
-    gl.uniform3f(u.u_lightDir,         -0.69, -0.23, -0.2);
-    gl.uniform3f(u.u_lightColor,        1.0,   1.0,   1.0);
-    gl.uniform3f(u.u_ambientColor,      0.3,   0.3,   0.3);
-    gl.uniform3f(u.u_materialColor,     0.9,   0.9,   0.9);
-    gl.uniform1f(u.u_shininess,         93.0);
-    gl.uniform1f(u.u_ambientStrength,   0.39);
-    gl.uniform1f(u.u_specularStrength,  2.76);
-
-    // 相机（固定位置）
-    gl.uniform3f(u.u_camPos, 6.1788, 1.4962, 5.7053);
-    gl.uniform1f(u.u_fov, 60.0 * Math.PI / 180.0);
+  // ── 尺寸 ───────────────────────────────────────────────────
+  function getDrawSize() {
+    const dpr = Math.min(window.devicePixelRatio, 2.0) * 0.525;
+    return [
+      Math.floor(window.innerWidth  * dpr),
+      Math.floor(window.innerHeight * dpr),
+    ];
   }
 
   function resize() {
     if (!canvas) return;
-    // 降采样 0.5 以保持性能（分形 SDF 计算量大）
-    const dpr = Math.min(window.devicePixelRatio, 2.0) * 0.525;
-    canvas.width  = Math.floor(window.innerWidth  * dpr);
-    canvas.height = Math.floor(window.innerHeight * dpr);
+    const [w, h] = getDrawSize();
+    canvas.width  = w;
+    canvas.height = h;
     canvas.style.width  = window.innerWidth  + 'px';
     canvas.style.height = window.innerHeight + 'px';
-    if (gl) gl.viewport(0, 0, canvas.width, canvas.height);
+    if (gl) gl.viewport(0, 0, w, h);
   }
 
-  let isActive = false;
+  // ── 过渡动画循环（轻量，仅混合两张纹理）─────────────────────
+  function startTransitionLoop() {
+    if (raf) return;
+    function loop(ts) {
+      if (!isTransitioning) { raf = null; return; }
+      const t = Math.min((ts - transitionStart) / TRANSITION_MS, 1.0);
 
-  function render(ts) {
-    if (!gl || !prog) return;
-    const t = (ts - startTime) / 1000.0;
-    gl.useProgram(prog);
-    setUniforms(gl, uniforms, t);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.useProgram(displayProg);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, fboA.tex);
+      gl.uniform1i(displayUniforms.u_texA, 0);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, fboB.tex);
+      gl.uniform1i(displayUniforms.u_texB, 1);
+      gl.uniform1f(displayUniforms.u_transition, t);
+      gl.uniform2f(displayUniforms.u_resolution, canvas.width, canvas.height);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+      if (t >= 1.0) {
+        isTransitioning = false;
+        // A ← B：交换引用，下次渲染时 B 会被覆盖
+        const tmp = fboA; fboA = fboB; fboB = tmp;
+        raf = null;
+      } else {
+        raf = requestAnimationFrame(loop);
+      }
+    }
+    raf = requestAnimationFrame(loop);
+  }
+
+  // ── 异步渲染分形到 fboB，完成后触发过渡 ───────────────────
+  function renderFractalToFBO(offset) {
+    const [w, h] = [canvas.width, canvas.height];
+
+    // 确保 FBO 尺寸匹配
+    if (!fboA || fboA.w !== w || fboA.h !== h) {
+      fboA = makeFBO(gl, w, h);
+      fboB = makeFBO(gl, w, h);
+      fboAValid = false;
+    }
+
+    // 渲染新帧到 fboB
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
+    gl.viewport(0, 0, w, h);
+    gl.useProgram(fractalProg);
+    setFractalUniforms(gl, fractalUniforms, offset);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    if (isActive) raf = requestAnimationFrame(render);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    if (!fboAValid) {
+      // 首帧：A 也填一样的内容，无过渡直接显示
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fboA.fbo);
+      gl.viewport(0, 0, w, h);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      fboAValid = true;
+
+      // 直接把 B 显示到屏幕
+      const tmp = fboA; fboA = fboB; fboB = tmp;
+      gl.viewport(0, 0, w, h);
+      gl.useProgram(displayProg);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, fboA.tex);
+      gl.uniform1i(displayUniforms.u_texA, 0);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, fboA.tex);
+      gl.uniform1i(displayUniforms.u_texB, 1);
+      gl.uniform1f(displayUniforms.u_transition, 0.0);
+      gl.uniform2f(displayUniforms.u_resolution, w, h);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      return;
+    }
+
+    // 启动过渡动画
+    isTransitioning = true;
+    transitionStart = performance.now();
+    startTransitionLoop();
   }
 
   // ── 公开 API ───────────────────────────────────────────────
   return {
     init(targetId = 'fractalCanvas') {
       canvas = document.getElementById(targetId);
-      if (!canvas) {
-        console.warn('FractalBG: canvas not found, id =', targetId);
-        return false;
-      }
+      if (!canvas) { console.warn('FractalBG: canvas not found, id =', targetId); return false; }
+
       gl = canvas.getContext('webgl2', { antialias: false, alpha: false });
       if (!gl) {
-        console.warn('FractalBG: WebGL2 not supported, skipping fractal background');
+        console.warn('FractalBG: WebGL2 not supported');
         canvas.style.display = 'none';
         return false;
       }
-      prog = buildProgram(gl);
-      if (!prog) return false;
-      uniforms = cacheUniforms(gl, prog);
+
+      fractalProg  = buildProgram(gl, FRAG_SRC);
+      displayProg  = buildProgram(gl, DISPLAY_FRAG_SRC);
+      if (!fractalProg || !displayProg) return false;
+
+      fractalUniforms = cacheFractalUniforms(gl, fractalProg);
+      displayUniforms = {
+        u_texA:       gl.getUniformLocation(displayProg, 'u_texA'),
+        u_texB:       gl.getUniformLocation(displayProg, 'u_texB'),
+        u_transition: gl.getUniformLocation(displayProg, 'u_transition'),
+        u_resolution: gl.getUniformLocation(displayProg, 'u_resolution'),
+      };
 
       resize();
-      window.addEventListener('resize', resize);
+      window.addEventListener('resize', () => {
+        resize();
+        fboAValid = false; // 尺寸变了，重新渲染首帧
+      });
 
       canvas.addEventListener('mouseenter', () => {
-        if (!isActive) {
-          isActive = true;
-          raf = requestAnimationFrame(render);
-        }
-      });
-      canvas.addEventListener('mousemove', (e) => {
-        const rect = canvas.getBoundingClientRect();
-        mouseOffset[0] = ((e.clientX - rect.left)  / rect.width  - 0.5) * MOUSE_STRENGTH;
-        mouseOffset[1] = ((e.clientY - rect.top)   / rect.height - 0.5) * MOUSE_STRENGTH;
-      });
-      canvas.addEventListener('mouseleave', () => {
-        mouseOffset[0] = 0;
-        mouseOffset[1] = 0;
-        isActive = false;
-        if (raf) { cancelAnimationFrame(raf); raf = null; }
+        // 立即用 offset=0 渲染首帧（如果还没有）
+        if (!fboAValid) renderFractalToFBO([0, 0]);
       });
 
-      startTime = performance.now();
-      // 初始不自动渲染，等待鼠标进入
+      canvas.addEventListener('mousemove', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        pendingOffset[0] = ((e.clientX - rect.left)  / rect.width  - 0.5) * MOUSE_STRENGTH;
+        pendingOffset[1] = ((e.clientY - rect.top)   / rect.height - 0.5) * MOUSE_STRENGTH;
+
+        // 防抖：鼠标停止移动 DEBOUNCE_MS 后才触发分形重计算
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          renderFractalToFBO([pendingOffset[0], pendingOffset[1]]);
+        }, DEBOUNCE_MS);
+      });
+
+      canvas.addEventListener('mouseleave', () => {
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      });
+
       return true;
     },
 
     stop() {
-      if (raf) cancelAnimationFrame(raf);
+      if (raf) { cancelAnimationFrame(raf); raf = null; }
     },
-
-    // 动态修改分形参数（可选）
-    setParam(name, value) {
-      // 下次 render 时 setUniforms 会覆盖，这里仅作为扩展点
-    }
   };
 })();
