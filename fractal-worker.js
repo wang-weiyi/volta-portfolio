@@ -288,10 +288,10 @@ const MOUSE_STRENGTH = 0.285;
 const DEBOUNCE_MS    = 350;
 const TRANSITION_MS  = 900;
 
-// ── GPU occupancy control parameters ───────────────────────────────────────
-const GPU_TARGET_USAGE = 0.90;   // Keep GPU usage ≤ 90%
-const TARGET_BATCH_MS  = 12;     // Aim each batch to take ~12ms (adjustable)
-const MIN_IDLE_MS      = 0.5;    // Minimum idle time to avoid busy-loop
+// ── NEW: Fixed idle time and tiny initial batches for absolute smoothness ──
+const FIXED_IDLE_MS   = 16;    // 16ms = one frame, guarantees UI gets GPU time
+const TARGET_BATCH_MS = 4;     // target each batch to take ~4ms (tiny)
+const MIN_ROWS        = 1;     // start with 1 row, adapt upward if too fast
 
 // ── GL helpers ─────────────────────────────────────────────────────────────
 function compileShader(g, type, src) {
@@ -421,7 +421,7 @@ function abortCurrentRender() {
   isTransitioning = false;
 }
 
-// ── Adaptive tiled fractal render with GPU occupancy control ──────────────
+// ── Adaptive tiled fractal render with fixed idle time ────────────────────
 async function renderFractalToFBO(offset) {
   const w = canvas.width, h = canvas.height;
   const gen = ++renderGen;
@@ -442,7 +442,8 @@ async function renderFractalToFBO(offset) {
   gl.useProgram(fractalProg);
   setFractalUniforms(gl, fractalUniforms, offset);
 
-  let rowsPerBatch = 4;   // adaptive: will adjust based on measured GPU time
+  // Start with 1 row to guarantee tiny GPU time
+  let rowsPerBatch = MIN_ROWS;
   let row = 0;
 
   while (row < h) {
@@ -458,25 +459,20 @@ async function renderFractalToFBO(offset) {
     gl.disable(gl.SCISSOR_TEST);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
+    // Measure GPU time for this batch
     const t0 = performance.now();
-    gl.finish();                      // wait for GPU to finish this batch
+    gl.finish();
     const gpuMs = performance.now() - t0;
 
     // Adapt batch height to keep each batch near TARGET_BATCH_MS
-    if (gpuMs > TARGET_BATCH_MS * 1.5 && rowsPerBatch > 1) {
-      rowsPerBatch = Math.max(1, Math.floor(rowsPerBatch * 0.7));
+    if (gpuMs > TARGET_BATCH_MS * 1.5 && rowsPerBatch > MIN_ROWS) {
+      rowsPerBatch = Math.max(MIN_ROWS, Math.floor(rowsPerBatch * 0.7));
     } else if (gpuMs < TARGET_BATCH_MS * 0.5) {
       rowsPerBatch = Math.min(h, Math.ceil(rowsPerBatch * 1.5));
     }
 
-    // Compute required idle time to achieve target GPU occupancy
-    let desiredIdle = (gpuMs / GPU_TARGET_USAGE) - gpuMs;
-    if (desiredIdle < MIN_IDLE_MS) desiredIdle = MIN_IDLE_MS;
-    // Cap maximum idle to avoid overly slow rendering (optional)
-    if (desiredIdle > 50) desiredIdle = 50;
-
-    // Yield GPU and event loop for the computed idle time
-    await new Promise(resolve => setTimeout(resolve, desiredIdle));
+    // Force idle for a full frame to let compositor work
+    await new Promise(resolve => setTimeout(resolve, FIXED_IDLE_MS));
 
     row += batchH;
   }
