@@ -10,7 +10,7 @@ void main(){
   vUv = (pos[gl_VertexID] + 1.0) * 0.5;
 }`;
 
-// ── Fractal fragment shader ────────────────────────────────────────────────
+// ── Fractal fragment shader (unchanged) ───────────────────────────────────
 const FRAG_SRC = `#version 300 es
 precision highp float;
 
@@ -231,7 +231,7 @@ void main() {
   fragColor = vec4(col, 1.0);
 }`;
 
-// ── Pixel-sort transition shader ───────────────────────────────────────────
+// ── Pixel-sort transition shader (unchanged) ──────────────────────────────
 const DISPLAY_FRAG_SRC = `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -287,13 +287,11 @@ let renderGen = 0; // Cancellation token: incremented on each new render request
 const MOUSE_STRENGTH = 0.285;
 const DEBOUNCE_MS    = 350;
 const TRANSITION_MS  = 900;
-// Strips to split each fractal render into.
-// Each strip = one GPU submission. The compositor can schedule between strips.
-// 48 strips × 10ms gap = compositor 在整个渲染周期内有 48 次 ~10ms 的 GPU 窗口
-// 每条 strip 的 GPU 负担 ≈ 总量/48，不会长时间独占 GPU
-// GPU target budget per batch: keep each draw call ≤ TARGET_GPU_MS
-// so the compositor never waits more than one batch duration for the GPU.
-const TARGET_GPU_MS = 8;
+
+// ── GPU occupancy control parameters ───────────────────────────────────────
+const GPU_TARGET_USAGE = 0.90;   // Keep GPU usage ≤ 90%
+const TARGET_BATCH_MS  = 12;     // Aim each batch to take ~12ms (adjustable)
+const MIN_IDLE_MS      = 0.5;    // Minimum idle time to avoid busy-loop
 
 // ── GL helpers ─────────────────────────────────────────────────────────────
 function compileShader(g, type, src) {
@@ -396,7 +394,6 @@ function drawDisplay(t) {
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 }
 
-// Transition loop: runs AFTER gl.finish() so GPU is free; each frame is fast.
 function startTransitionLoop() {
   if (transitionTimer !== null) return;
   function tick() {
@@ -414,18 +411,17 @@ function startTransitionLoop() {
   transitionTimer = setTimeout(tick, 16);
 }
 
-// ── Adaptive tiled fractal render ─────────────────────────────────────────
-// Key insight: gl.finish() blocks ONLY the worker thread, not the main thread
-// or compositor. By measuring actual GPU time per batch and keeping it under
-// TARGET_GPU_MS, the compositor always gets GPU access within one batch window.
-//
-// Flow per batch:
-//   drawArrays (submit to GPU) → gl.finish() (worker waits; GPU executes)
-//   → setTimeout(0) (yield worker event loop; compositor gets GPU window)
-//   → next batch
-//
-// Batch height adapts: if GPU took too long → fewer rows; too fast → more rows.
+// ── Abort any ongoing render or transition ────────────────────────────────
+function abortCurrentRender() {
+  renderGen++;                // invalidate current rendering loop
+  if (transitionTimer) {
+    clearTimeout(transitionTimer);
+    transitionTimer = null;
+  }
+  isTransitioning = false;
+}
 
+// ── Adaptive tiled fractal render with GPU occupancy control ──────────────
 async function renderFractalToFBO(offset) {
   const w = canvas.width, h = canvas.height;
   const gen = ++renderGen;
@@ -446,44 +442,49 @@ async function renderFractalToFBO(offset) {
   gl.useProgram(fractalProg);
   setFractalUniforms(gl, fractalUniforms, offset);
 
-  let rowsPerBatch = 4; // start conservative; adapts after first measurement
+  let rowsPerBatch = 4;   // adaptive: will adjust based on measured GPU time
   let row = 0;
 
   while (row < h) {
-    if (gen !== renderGen) return; // newer request arrived — abort
+    if (gen !== renderGen) return;   // cancelled by new request
 
     const batchH = Math.min(rowsPerBatch, h - row);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
-    gl.viewport(0, 0, w, h);         // full viewport so vUv maps correctly
+    gl.viewport(0, 0, w, h);
     gl.enable(gl.SCISSOR_TEST);
-    gl.scissor(0, row, w, batchH);   // only write this band of rows
+    gl.scissor(0, row, w, batchH);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.disable(gl.SCISSOR_TEST);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
-    // gl.finish() — blocks worker until GPU finishes this batch.
-    // Main thread and compositor are NOT stalled here.
-    // Measuring wall time after finish() gives actual GPU duration.
     const t0 = performance.now();
-    gl.finish();
+    gl.finish();                      // wait for GPU to finish this batch
     const gpuMs = performance.now() - t0;
 
-    // Adapt batch height to keep GPU time near TARGET_GPU_MS
-    if      (gpuMs > TARGET_GPU_MS * 1.5) rowsPerBatch = Math.max(1, Math.floor(rowsPerBatch * 0.6));
-    else if (gpuMs < TARGET_GPU_MS * 0.5) rowsPerBatch = Math.min(h, Math.ceil(rowsPerBatch * 1.8));
+    // Adapt batch height to keep each batch near TARGET_BATCH_MS
+    if (gpuMs > TARGET_BATCH_MS * 1.5 && rowsPerBatch > 1) {
+      rowsPerBatch = Math.max(1, Math.floor(rowsPerBatch * 0.7));
+    } else if (gpuMs < TARGET_BATCH_MS * 0.5) {
+      rowsPerBatch = Math.min(h, Math.ceil(rowsPerBatch * 1.5));
+    }
+
+    // Compute required idle time to achieve target GPU occupancy
+    let desiredIdle = (gpuMs / GPU_TARGET_USAGE) - gpuMs;
+    if (desiredIdle < MIN_IDLE_MS) desiredIdle = MIN_IDLE_MS;
+    // Cap maximum idle to avoid overly slow rendering (optional)
+    if (desiredIdle > 50) desiredIdle = 50;
+
+    // Yield GPU and event loop for the computed idle time
+    await new Promise(resolve => setTimeout(resolve, desiredIdle));
 
     row += batchH;
-
-    // yield worker event loop: pending postMessages processed, compositor
-    // gets a GPU window between our finish() and the next drawArrays
-    await new Promise(resolve => setTimeout(resolve, 0));
   }
 
   if (gen !== renderGen) return;
 
   if (!fboAValid) {
-    // First frame: blit fboB → fboA, show immediately without transition
+    // First frame: copy fboB -> fboA, show immediately without transition
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fboB.fbo);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, fboA.fbo);
     gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
@@ -527,16 +528,17 @@ self.addEventListener('message', (e) => {
 
   } else if (type === 'resize') {
     if (!canvas) return;
+    abortCurrentRender();               // stop any ongoing render
     canvas.width  = e.data.w;
     canvas.height = e.data.h;
     if (gl) gl.viewport(0, 0, e.data.w, e.data.h);
     fboAValid = false;
-    renderGen++; // Cancel any in-progress tiled render
 
   } else if (type === 'mouseenter') {
     if (!fboAValid) renderFractalToFBO([0, 0]);
 
   } else if (type === 'mousemove') {
+    abortCurrentRender();               // immediate GPU release on mouse move
     pendingOffset[0] = (e.data.nx - 0.5) * MOUSE_STRENGTH;
     pendingOffset[1] = (e.data.ny - 0.5) * MOUSE_STRENGTH;
     clearTimeout(debounceTimer);
@@ -545,6 +547,7 @@ self.addEventListener('message', (e) => {
     }, DEBOUNCE_MS);
 
   } else if (type === 'mouseleave') {
+    abortCurrentRender();
     clearTimeout(debounceTimer);
     debounceTimer = null;
   }
