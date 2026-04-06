@@ -291,8 +291,9 @@ const TRANSITION_MS  = 900;
 // Each strip = one GPU submission. The compositor can schedule between strips.
 // 48 strips × 10ms gap = compositor 在整个渲染周期内有 48 次 ~10ms 的 GPU 窗口
 // 每条 strip 的 GPU 负担 ≈ 总量/48，不会长时间独占 GPU
-const NUM_STRIPS      = 48;
-const STRIP_DELAY_MS  = 10;
+// GPU target budget per batch: keep each draw call ≤ TARGET_GPU_MS
+// so the compositor never waits more than one batch duration for the GPU.
+const TARGET_GPU_MS = 8;
 
 // ── GL helpers ─────────────────────────────────────────────────────────────
 function compileShader(g, type, src) {
@@ -413,92 +414,91 @@ function startTransitionLoop() {
   transitionTimer = setTimeout(tick, 16);
 }
 
-// ── Tiled fractal render ───────────────────────────────────────────────────
-// Splits the render into NUM_STRIPS horizontal strips.
-// Each strip is a separate gl.drawArrays call followed by gl.flush() + setTimeout(0).
-// This gives the GPU compositor scheduling windows between strips.
-// After the final strip, gl.finish() waits for GPU completion (blocks worker only),
-// then the transition starts — so transition frames are never queued behind fractal work.
+// ── Adaptive tiled fractal render ─────────────────────────────────────────
+// Key insight: gl.finish() blocks ONLY the worker thread, not the main thread
+// or compositor. By measuring actual GPU time per batch and keeping it under
+// TARGET_GPU_MS, the compositor always gets GPU access within one batch window.
+//
+// Flow per batch:
+//   drawArrays (submit to GPU) → gl.finish() (worker waits; GPU executes)
+//   → setTimeout(0) (yield worker event loop; compositor gets GPU window)
+//   → next batch
+//
+// Batch height adapts: if GPU took too long → fewer rows; too fast → more rows.
 
-function renderFractalToFBO(offset) {
+async function renderFractalToFBO(offset) {
   const w = canvas.width, h = canvas.height;
+  const gen = ++renderGen;
 
-  // Reallocate FBOs if canvas size changed
   if (!fboA || fboA.w !== w || fboA.h !== h) {
     fboA = makeFBO(gl, w, h);
     fboB = makeFBO(gl, w, h);
     fboAValid = false;
   }
 
-  // Abort any in-progress transition so fboA/B aren't swapped mid-render
   if (isTransitioning) {
     isTransitioning = false;
     clearTimeout(transitionTimer);
     transitionTimer = null;
-    // Snap fboA to fboB so the user sees the most recent completed frame
     const tmp = fboA; fboA = fboB; fboB = tmp;
   }
 
-  // Set up fractal program once (uniforms stay the same for all strips)
   gl.useProgram(fractalProg);
   setFractalUniforms(gl, fractalUniforms, offset);
 
-  const stripH = Math.ceil(h / NUM_STRIPS);
-  const gen = ++renderGen; // Cancellation token for this render pass
+  let rowsPerBatch = 4; // start conservative; adapts after first measurement
+  let row = 0;
 
-  function renderNextStrip(strip) {
-    // A newer render request arrived — abort this pass
-    if (gen !== renderGen) return;
+  while (row < h) {
+    if (gen !== renderGen) return; // newer request arrived — abort
 
-    if (strip >= NUM_STRIPS) {
-      // ── All strips submitted. Wait for GPU to finish. ──────────
-      // gl.finish() blocks the worker thread only; main thread stays free.
-      // This ensures transition frames start AFTER the fractal is on the GPU.
-      gl.finish();
-
-      // ── First frame: blit fboB → fboA, then show immediately ──
-      if (!fboAValid) {
-        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fboB.fbo);
-        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, fboA.fbo);
-        gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
-        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
-        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-        fboAValid = true;
-        // Show fboA (= fboB contents) with transition = 0 (no animation)
-        const tmp = fboA; fboA = fboB; fboB = tmp;
-        drawDisplay(0.0);
-        return;
-      }
-
-      // ── Subsequent frames: start pixel-sort transition ─────────
-      isTransitioning = true;
-      transitionStart = performance.now();
-      startTransitionLoop();
-      return;
-    }
-
-    // ── Render one horizontal strip into fboB ──────────────────
-    const y0 = strip * stripH;
-    const yH = Math.min(stripH, h - y0);
+    const batchH = Math.min(rowsPerBatch, h - row);
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
-    // Full viewport so vUv covers the entire image (scissor clips output)
-    gl.viewport(0, 0, w, h);
+    gl.viewport(0, 0, w, h);         // full viewport so vUv maps correctly
     gl.enable(gl.SCISSOR_TEST);
-    gl.scissor(0, y0, w, yH);
+    gl.scissor(0, row, w, batchH);   // only write this band of rows
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.disable(gl.SCISSOR_TEST);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
-    // Submit this strip to the GPU without stalling the worker.
-    // setTimeout(0) yields the worker's JS event loop so:
-    //   1. Pending postMessage events (mousemove, etc.) can be processed
-    //   2. The GPU process gets a scheduling window for compositing
-    gl.flush();
-    setTimeout(() => renderNextStrip(strip + 1), STRIP_DELAY_MS);
+    // gl.finish() — blocks worker until GPU finishes this batch.
+    // Main thread and compositor are NOT stalled here.
+    // Measuring wall time after finish() gives actual GPU duration.
+    const t0 = performance.now();
+    gl.finish();
+    const gpuMs = performance.now() - t0;
+
+    // Adapt batch height to keep GPU time near TARGET_GPU_MS
+    if      (gpuMs > TARGET_GPU_MS * 1.5) rowsPerBatch = Math.max(1, Math.floor(rowsPerBatch * 0.6));
+    else if (gpuMs < TARGET_GPU_MS * 0.5) rowsPerBatch = Math.min(h, Math.ceil(rowsPerBatch * 1.8));
+
+    row += batchH;
+
+    // yield worker event loop: pending postMessages processed, compositor
+    // gets a GPU window between our finish() and the next drawArrays
+    await new Promise(resolve => setTimeout(resolve, 0));
   }
 
-  renderNextStrip(0);
+  if (gen !== renderGen) return;
+
+  if (!fboAValid) {
+    // First frame: blit fboB → fboA, show immediately without transition
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fboB.fbo);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, fboA.fbo);
+    gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+    fboAValid = true;
+    const tmp = fboA; fboA = fboB; fboB = tmp;
+    drawDisplay(0.0);
+    return;
+  }
+
+  // All batches done — start pixel-sort transition
+  isTransitioning = true;
+  transitionStart = performance.now();
+  startTransitionLoop();
 }
 
 // ── Message handler ────────────────────────────────────────────────────────
