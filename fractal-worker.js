@@ -289,7 +289,10 @@ const DEBOUNCE_MS    = 350;
 const TRANSITION_MS  = 900;
 // Strips to split each fractal render into.
 // Each strip = one GPU submission. The compositor can schedule between strips.
-const NUM_STRIPS     = 16;
+// 48 strips × 10ms gap = compositor 在整个渲染周期内有 48 次 ~10ms 的 GPU 窗口
+// 每条 strip 的 GPU 负担 ≈ 总量/48，不会长时间独占 GPU
+const NUM_STRIPS      = 48;
+const STRIP_DELAY_MS  = 10;
 
 // ── GL helpers ─────────────────────────────────────────────────────────────
 function compileShader(g, type, src) {
@@ -492,7 +495,7 @@ function renderFractalToFBO(offset) {
     //   1. Pending postMessage events (mousemove, etc.) can be processed
     //   2. The GPU process gets a scheduling window for compositing
     gl.flush();
-    setTimeout(() => renderNextStrip(strip + 1), 0);
+    setTimeout(() => renderNextStrip(strip + 1), STRIP_DELAY_MS);
   }
 
   renderNextStrip(0);

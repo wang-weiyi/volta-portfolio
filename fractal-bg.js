@@ -7,7 +7,9 @@ const FractalBG = (() => {
   let worker = null;
 
   function getDrawSize() {
-    const dpr = window.devicePixelRatio || 1;
+    // 0.4x 降采样：大幅减少 GPU 像素负担，保证 compositor 流畅
+    // 分形是背景元素，略模糊不影响视觉质量
+    const dpr = (window.devicePixelRatio || 1) * 0.4;
     return [
       Math.floor(window.innerWidth  * dpr),
       Math.floor(window.innerHeight * dpr),
