@@ -10,7 +10,7 @@ void main(){
   vUv = (pos[gl_VertexID] + 1.0) * 0.5;
 }`;
 
-// ── Fractal fragment shader (unchanged) ───────────────────────────────────
+// ── Fractal fragment shader ────────────────────────────────────────────────
 const FRAG_SRC = `#version 300 es
 precision highp float;
 
@@ -231,7 +231,7 @@ void main() {
   fragColor = vec4(col, 1.0);
 }`;
 
-// ── Pixel-sort transition shader (unchanged) ──────────────────────────────
+// ── Pixel-sort transition shader ───────────────────────────────────────────
 const DISPLAY_FRAG_SRC = `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -282,17 +282,20 @@ let isTransitioning = false;
 let transitionTimer = null;
 let debounceTimer = null;
 let canvas = null;
-let renderGen = 0; // Cancellation token
+let renderGen = 0; // Cancellation token: incremented on each new render request
 
 const MOUSE_STRENGTH = 0.285;
 const DEBOUNCE_MS    = 350;
 const TRANSITION_MS  = 900;
 
-// ── Tile-based rendering parameters ───────────────────────────────────────
-let TILE_SIZE = 32;           // start with 32x32 pixels per tile
-const MIN_TILE_SIZE = 8;      // never go below 8x8
-const TARGET_TILE_MS = 2.0;   // aim for each tile < 2ms GPU time
-const IDLE_MS_PER_TILE = 8;   // force idle 8ms after each tile
+// Fractal FBO computed at this fraction of canvas resolution.
+// Display shader outputs at full canvas res with bilinear upscale (GL_LINEAR).
+// This is the same principle as FSR/DLSS — decouple compute res from output res.
+const RENDER_SCALE  = 0.5;
+
+// GPU budget per batch: each drawArrays must finish within this time.
+// Since GPU is non-preemptible, this is the max compositor stall per batch.
+const TARGET_GPU_MS = 4;
 
 // ── GL helpers ─────────────────────────────────────────────────────────────
 function compileShader(g, type, src) {
@@ -351,9 +354,9 @@ function cacheFractalUniforms(g, p) {
   return out;
 }
 
-function setFractalUniforms(g, u, offset) {
+function setFractalUniforms(g, u, offset, rw, rh) {
   g.uniform1f(u.u_time, 0.0);
-  g.uniform2f(u.u_resolution, canvas.width, canvas.height);
+  g.uniform2f(u.u_resolution, rw, rh);
   g.uniform3f(u.u_juliaC,           0.345, 0.557, 0.0);
   g.uniform2f(u.u_juliaCOffset,     offset[0], offset[1]);
   g.uniform3f(u.u_rotAxis,          1.0, 0.0, 0.0);
@@ -381,7 +384,6 @@ function setFractalUniforms(g, u, offset) {
 
 // ── Display (transition) rendering ────────────────────────────────────────
 function drawDisplay(t) {
-  if (!gl) return;
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.viewport(0, 0, canvas.width, canvas.height);
   gl.useProgram(displayProg);
@@ -396,6 +398,7 @@ function drawDisplay(t) {
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 }
 
+// Transition loop: runs AFTER gl.finish() so GPU is free; each frame is fast.
 function startTransitionLoop() {
   if (transitionTimer !== null) return;
   function tick() {
@@ -413,28 +416,27 @@ function startTransitionLoop() {
   transitionTimer = setTimeout(tick, 16);
 }
 
-// ── Abort any ongoing render or transition ────────────────────────────────
-function abortCurrentRender() {
-  renderGen++;                // invalidate current rendering loop
-  if (transitionTimer) {
-    clearTimeout(transitionTimer);
-    transitionTimer = null;
-  }
-  if (isTransitioning) {
-    isTransitioning = false;
-    // Immediately show the base frame (fboA) without transition
-    drawDisplay(0.0);
-  }
-}
+// ── Adaptive tiled fractal render ─────────────────────────────────────────
+// Key insight: gl.finish() blocks ONLY the worker thread, not the main thread
+// or compositor. By measuring actual GPU time per batch and keeping it under
+// TARGET_GPU_MS, the compositor always gets GPU access within one batch window.
+//
+// Flow per batch:
+//   drawArrays (submit to GPU) → gl.finish() (worker waits; GPU executes)
+//   → setTimeout(0) (yield worker event loop; compositor gets GPU window)
+//   → next batch
+//
+// Batch height adapts: if GPU took too long → fewer rows; too fast → more rows.
 
-// ── Tile-based fractal render ─────────────────────────────────────────────
 async function renderFractalToFBO(offset) {
-  const w = canvas.width, h = canvas.height;
+  // Fractal FBO at reduced resolution; display shader upscales to full canvas.
+  const rw = Math.max(1, Math.round(canvas.width  * RENDER_SCALE));
+  const rh = Math.max(1, Math.round(canvas.height * RENDER_SCALE));
   const gen = ++renderGen;
 
-  if (!fboA || fboA.w !== w || fboA.h !== h) {
-    fboA = makeFBO(gl, w, h);
-    fboB = makeFBO(gl, w, h);
+  if (!fboA || fboA.w !== rw || fboA.h !== rh) {
+    fboA = makeFBO(gl, rw, rh);
+    fboB = makeFBO(gl, rw, rh);
     fboAValid = false;
   }
 
@@ -446,53 +448,45 @@ async function renderFractalToFBO(offset) {
   }
 
   gl.useProgram(fractalProg);
-  setFractalUniforms(gl, fractalUniforms, offset);
+  setFractalUniforms(gl, fractalUniforms, offset, rw, rh);
 
-  // Dynamic tile size: start from last known good size
-  let tileSize = TILE_SIZE;
-  // Iterate over tiles in row-major order
-  for (let y = 0; y < h; y += tileSize) {
-    for (let x = 0; x < w; x += tileSize) {
-      if (gen !== renderGen) return;   // cancelled
+  let rowsPerBatch = 2; // start very conservative
+  let row = 0;
 
-      const tileW = Math.min(tileSize, w - x);
-      const tileH = Math.min(tileSize, h - y);
-      if (tileW <= 0 || tileH <= 0) continue;
+  while (row < rh) {
+    if (gen !== renderGen) return;
 
-      // Set scissor to the tile rectangle
-      gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
-      gl.viewport(0, 0, w, h);
-      gl.enable(gl.SCISSOR_TEST);
-      gl.scissor(x, y, tileW, tileH);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-      gl.disable(gl.SCISSOR_TEST);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const batchH = Math.min(rowsPerBatch, rh - row);
 
-      // Measure GPU time for this tile
-      const t0 = performance.now();
-      gl.finish();
-      const gpuMs = performance.now() - t0;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
+    gl.viewport(0, 0, rw, rh);
+    gl.enable(gl.SCISSOR_TEST);
+    gl.scissor(0, row, rw, batchH);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
-      // Adapt tile size to keep GPU time under TARGET_TILE_MS
-      if (gpuMs > TARGET_TILE_MS * 1.2 && tileSize > MIN_TILE_SIZE) {
-        tileSize = Math.max(MIN_TILE_SIZE, Math.floor(tileSize * 0.8));
-      } else if (gpuMs < TARGET_TILE_MS * 0.6 && tileSize < 128) {
-        tileSize = Math.min(128, Math.ceil(tileSize * 1.2));
-      }
-      TILE_SIZE = tileSize;  // remember for next render
+    // gl.finish() blocks worker only — measures true GPU time for this batch.
+    const t0 = performance.now();
+    gl.finish();
+    const gpuMs = performance.now() - t0;
 
-      // Force idle to let browser compositor work
-      await new Promise(resolve => setTimeout(resolve, IDLE_MS_PER_TILE));
-    }
+    // Adapt: keep each batch under TARGET_GPU_MS
+    if      (gpuMs > TARGET_GPU_MS * 1.3) rowsPerBatch = Math.max(1, Math.floor(rowsPerBatch * 0.5));
+    else if (gpuMs < TARGET_GPU_MS * 0.4) rowsPerBatch = Math.min(rh, Math.ceil(rowsPerBatch * 2.0));
+
+    row += batchH;
+
+    // Yield: compositor gets a GPU-free window here.
+    await new Promise(resolve => setTimeout(resolve, 0));
   }
 
   if (gen !== renderGen) return;
 
   if (!fboAValid) {
-    // First frame: copy fboB -> fboA, show immediately
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fboB.fbo);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, fboA.fbo);
-    gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    gl.blitFramebuffer(0, 0, rw, rh, 0, 0, rw, rh, gl.COLOR_BUFFER_BIT, gl.NEAREST);
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
     fboAValid = true;
@@ -501,7 +495,6 @@ async function renderFractalToFBO(offset) {
     return;
   }
 
-  // All tiles done — start transition
   isTransitioning = true;
   transitionStart = performance.now();
   startTransitionLoop();
@@ -533,17 +526,16 @@ self.addEventListener('message', (e) => {
 
   } else if (type === 'resize') {
     if (!canvas) return;
-    abortCurrentRender();
     canvas.width  = e.data.w;
     canvas.height = e.data.h;
     if (gl) gl.viewport(0, 0, e.data.w, e.data.h);
     fboAValid = false;
+    renderGen++; // Cancel any in-progress tiled render
 
   } else if (type === 'mouseenter') {
     if (!fboAValid) renderFractalToFBO([0, 0]);
 
   } else if (type === 'mousemove') {
-    abortCurrentRender();   // instantly stop all GPU work and transitions
     pendingOffset[0] = (e.data.nx - 0.5) * MOUSE_STRENGTH;
     pendingOffset[1] = (e.data.ny - 0.5) * MOUSE_STRENGTH;
     clearTimeout(debounceTimer);
@@ -552,7 +544,6 @@ self.addEventListener('message', (e) => {
     }, DEBOUNCE_MS);
 
   } else if (type === 'mouseleave') {
-    abortCurrentRender();
     clearTimeout(debounceTimer);
     debounceTimer = null;
   }
