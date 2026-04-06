@@ -256,8 +256,8 @@ void main() {
   float colDelay = colRand * 0.38;
   float colT     = clamp((u_transition - colDelay) / (1.0 - colDelay), 0.0, 1.0);
 
-  float luma    = dot(texture(u_texA, uv).rgb, vec3(0.2126, 0.7152, 0.0722));
-  float sortDir = (colRand > 0.5) ? 1.0 : -1.0;
+  float luma     = dot(texture(u_texA, uv).rgb, vec3(0.2126, 0.7152, 0.0722));
+  float sortDir  = (colRand > 0.5) ? 1.0 : -1.0;
   float envelope = sin(colT * 3.14159);
   float shift    = (luma - 0.45) * sortDir * envelope * 0.52;
 
@@ -279,13 +279,17 @@ let fboAValid = false;
 let pendingOffset = [0, 0];
 let transitionStart = 0;
 let isTransitioning = false;
-let debounceTimer = null;
 let transitionTimer = null;
+let debounceTimer = null;
 let canvas = null;
+let renderGen = 0; // Cancellation token: incremented on each new render request
 
 const MOUSE_STRENGTH = 0.285;
 const DEBOUNCE_MS    = 350;
 const TRANSITION_MS  = 900;
+// Strips to split each fractal render into.
+// Each strip = one GPU submission. The compositor can schedule between strips.
+const NUM_STRIPS     = 16;
 
 // ── GL helpers ─────────────────────────────────────────────────────────────
 function compileShader(g, type, src) {
@@ -346,7 +350,7 @@ function cacheFractalUniforms(g, p) {
 
 function setFractalUniforms(g, u, offset) {
   g.uniform1f(u.u_time, 0.0);
-  g.uniform2f(u.u_resolution, g.drawingBufferWidth, g.drawingBufferHeight);
+  g.uniform2f(u.u_resolution, canvas.width, canvas.height);
   g.uniform3f(u.u_juliaC,           0.345, 0.557, 0.0);
   g.uniform2f(u.u_juliaCOffset,     offset[0], offset[1]);
   g.uniform3f(u.u_rotAxis,          1.0, 0.0, 0.0);
@@ -372,7 +376,7 @@ function setFractalUniforms(g, u, offset) {
   g.uniform1f(u.u_fov,              60.0 * Math.PI / 180.0);
 }
 
-// ── Transition loop (setTimeout-based, rAF not available in workers) ────────
+// ── Display (transition) rendering ────────────────────────────────────────
 function drawDisplay(t) {
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.viewport(0, 0, canvas.width, canvas.height);
@@ -388,6 +392,7 @@ function drawDisplay(t) {
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 }
 
+// Transition loop: runs AFTER gl.finish() so GPU is free; each frame is fast.
 function startTransitionLoop() {
   if (transitionTimer !== null) return;
   function tick() {
@@ -397,7 +402,6 @@ function startTransitionLoop() {
     if (t >= 1.0) {
       isTransitioning = false;
       transitionTimer = null;
-      // swap A ← B
       const tmp = fboA; fboA = fboB; fboB = tmp;
     } else {
       transitionTimer = setTimeout(tick, 16);
@@ -406,47 +410,92 @@ function startTransitionLoop() {
   transitionTimer = setTimeout(tick, 16);
 }
 
-// ── Render fractal → fboB, then trigger transition ─────────────────────────
+// ── Tiled fractal render ───────────────────────────────────────────────────
+// Splits the render into NUM_STRIPS horizontal strips.
+// Each strip is a separate gl.drawArrays call followed by gl.flush() + setTimeout(0).
+// This gives the GPU compositor scheduling windows between strips.
+// After the final strip, gl.finish() waits for GPU completion (blocks worker only),
+// then the transition starts — so transition frames are never queued behind fractal work.
+
 function renderFractalToFBO(offset) {
   const w = canvas.width, h = canvas.height;
 
+  // Reallocate FBOs if canvas size changed
   if (!fboA || fboA.w !== w || fboA.h !== h) {
     fboA = makeFBO(gl, w, h);
     fboB = makeFBO(gl, w, h);
     fboAValid = false;
   }
 
-  // render new frame into fboB
-  gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
-  gl.viewport(0, 0, w, h);
-  gl.useProgram(fractalProg);
-  setFractalUniforms(gl, fractalUniforms, offset);
-  gl.drawArrays(gl.TRIANGLES, 0, 3);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-
-  if (!fboAValid) {
-    // first frame: fill fboA with same content, show immediately without transition
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fboA.fbo);
-    gl.viewport(0, 0, w, h);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    fboAValid = true;
-    const tmp = fboA; fboA = fboB; fboB = tmp;
-    drawDisplay(0.0);
-    return;
-  }
-
-  // start pixel-sort transition
+  // Abort any in-progress transition so fboA/B aren't swapped mid-render
   if (isTransitioning) {
-    // cancel ongoing transition, snap to B immediately then proceed
     isTransitioning = false;
     clearTimeout(transitionTimer);
     transitionTimer = null;
+    // Snap fboA to fboB so the user sees the most recent completed frame
     const tmp = fboA; fboA = fboB; fboB = tmp;
   }
-  isTransitioning = true;
-  transitionStart = performance.now();
-  startTransitionLoop();
+
+  // Set up fractal program once (uniforms stay the same for all strips)
+  gl.useProgram(fractalProg);
+  setFractalUniforms(gl, fractalUniforms, offset);
+
+  const stripH = Math.ceil(h / NUM_STRIPS);
+  const gen = ++renderGen; // Cancellation token for this render pass
+
+  function renderNextStrip(strip) {
+    // A newer render request arrived — abort this pass
+    if (gen !== renderGen) return;
+
+    if (strip >= NUM_STRIPS) {
+      // ── All strips submitted. Wait for GPU to finish. ──────────
+      // gl.finish() blocks the worker thread only; main thread stays free.
+      // This ensures transition frames start AFTER the fractal is on the GPU.
+      gl.finish();
+
+      // ── First frame: blit fboB → fboA, then show immediately ──
+      if (!fboAValid) {
+        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fboB.fbo);
+        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, fboA.fbo);
+        gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+        fboAValid = true;
+        // Show fboA (= fboB contents) with transition = 0 (no animation)
+        const tmp = fboA; fboA = fboB; fboB = tmp;
+        drawDisplay(0.0);
+        return;
+      }
+
+      // ── Subsequent frames: start pixel-sort transition ─────────
+      isTransitioning = true;
+      transitionStart = performance.now();
+      startTransitionLoop();
+      return;
+    }
+
+    // ── Render one horizontal strip into fboB ──────────────────
+    const y0 = strip * stripH;
+    const yH = Math.min(stripH, h - y0);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
+    // Full viewport so vUv covers the entire image (scissor clips output)
+    gl.viewport(0, 0, w, h);
+    gl.enable(gl.SCISSOR_TEST);
+    gl.scissor(0, y0, w, yH);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    // Submit this strip to the GPU without stalling the worker.
+    // setTimeout(0) yields the worker's JS event loop so:
+    //   1. Pending postMessage events (mousemove, etc.) can be processed
+    //   2. The GPU process gets a scheduling window for compositing
+    gl.flush();
+    setTimeout(() => renderNextStrip(strip + 1), 0);
+  }
+
+  renderNextStrip(0);
 }
 
 // ── Message handler ────────────────────────────────────────────────────────
@@ -479,6 +528,7 @@ self.addEventListener('message', (e) => {
     canvas.height = e.data.h;
     if (gl) gl.viewport(0, 0, e.data.w, e.data.h);
     fboAValid = false;
+    renderGen++; // Cancel any in-progress tiled render
 
   } else if (type === 'mouseenter') {
     if (!fboAValid) renderFractalToFBO([0, 0]);
