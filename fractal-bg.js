@@ -284,9 +284,9 @@ void main() {
   bool hit = false;
   int rmIter = 300; // raymarching 步数（降低以提升性能）
 
-  for (int i = 0; i < 300; i++) {
+  for (int i = 0; i < 600; i++) {
     float dist = sdf(raypos);
-    if (dist < 0.00001) { hit = true; break; }
+    if (dist < 0.000001) { hit = true; break; }
     if (length(raypos - ro) > 60.0) break;
     raypos += dist * rd;
   }
