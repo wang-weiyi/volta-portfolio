@@ -288,13 +288,8 @@ const MOUSE_STRENGTH = 0.285;
 const DEBOUNCE_MS    = 350;
 const TRANSITION_MS  = 900;
 
-// Fractal FBO computed at this fraction of canvas resolution.
-// Display shader outputs at full canvas res with bilinear upscale (GL_LINEAR).
-// This is the same principle as FSR/DLSS — decouple compute res from output res.
-const RENDER_SCALE  = 0.5;
-
-// GPU budget per batch: each drawArrays must finish within this time.
-// Since GPU is non-preemptible, this is the max compositor stall per batch.
+// GPU budget per tile: once drawArrays starts, GPU is non-preemptible.
+// This is the max compositor stall per tile. Must be < 1 vsync (16ms).
 const TARGET_GPU_MS = 4;
 
 // ── GL helpers ─────────────────────────────────────────────────────────────
@@ -429,14 +424,12 @@ function startTransitionLoop() {
 // Batch height adapts: if GPU took too long → fewer rows; too fast → more rows.
 
 async function renderFractalToFBO(offset) {
-  // Fractal FBO at reduced resolution; display shader upscales to full canvas.
-  const rw = Math.max(1, Math.round(canvas.width  * RENDER_SCALE));
-  const rh = Math.max(1, Math.round(canvas.height * RENDER_SCALE));
+  const w = canvas.width, h = canvas.height;
   const gen = ++renderGen;
 
-  if (!fboA || fboA.w !== rw || fboA.h !== rh) {
-    fboA = makeFBO(gl, rw, rh);
-    fboB = makeFBO(gl, rw, rh);
+  if (!fboA || fboA.w !== w || fboA.h !== h) {
+    fboA = makeFBO(gl, w, h);
+    fboB = makeFBO(gl, w, h);
     fboAValid = false;
   }
 
@@ -448,37 +441,55 @@ async function renderFractalToFBO(offset) {
   }
 
   gl.useProgram(fractalProg);
-  setFractalUniforms(gl, fractalUniforms, offset, rw, rh);
+  setFractalUniforms(gl, fractalUniforms, offset, w, h);
 
-  let rowsPerBatch = 2; // start very conservative
-  let row = 0;
+  // ── Adaptive tile-based rendering ──────────────────────────
+  // Row-based batching fails when even 1 full-width row exceeds the GPU
+  // budget (e.g. 3840px × heavy shader > 16ms). Tiles cut BOTH dimensions,
+  // so a 64×64 tile = 4096 fragments — small enough for <4ms on most GPUs.
+  //
+  // Tile side length adapts: after each tile we measure actual GPU time,
+  // compute ms-per-pixel, and resize to hit TARGET_GPU_MS.
 
-  while (row < rh) {
-    if (gen !== renderGen) return;
+  let tileSide = 64; // starting guess; adapts after first measurement
 
-    const batchH = Math.min(rowsPerBatch, rh - row);
+  for (let y = 0; y < h;) {
+    for (let x = 0; x < w;) {
+      if (gen !== renderGen) return; // newer request — abort
 
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
-    gl.viewport(0, 0, rw, rh);
-    gl.enable(gl.SCISSOR_TEST);
-    gl.scissor(0, row, rw, batchH);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-    gl.disable(gl.SCISSOR_TEST);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      const tw = Math.min(tileSide, w - x);
+      const th = Math.min(tileSide, h - y);
 
-    // gl.finish() blocks worker only — measures true GPU time for this batch.
-    const t0 = performance.now();
-    gl.finish();
-    const gpuMs = performance.now() - t0;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
+      gl.viewport(0, 0, w, h);
+      gl.enable(gl.SCISSOR_TEST);
+      gl.scissor(x, y, tw, th);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.disable(gl.SCISSOR_TEST);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
-    // Adapt: keep each batch under TARGET_GPU_MS
-    if      (gpuMs > TARGET_GPU_MS * 1.3) rowsPerBatch = Math.max(1, Math.floor(rowsPerBatch * 0.5));
-    else if (gpuMs < TARGET_GPU_MS * 0.4) rowsPerBatch = Math.min(rh, Math.ceil(rowsPerBatch * 2.0));
+      // gl.finish() blocks worker only; measures real GPU time for this tile
+      const t0 = performance.now();
+      gl.finish();
+      const gpuMs = performance.now() - t0;
 
-    row += batchH;
+      // Adapt tile size based on measured cost per pixel
+      const pixels = tw * th;
+      if (gpuMs > 0.01) {
+        const msPerPx    = gpuMs / pixels;
+        const wantPixels = TARGET_GPU_MS / msPerPx;
+        const wantSide   = Math.sqrt(wantPixels);
+        // Smooth adjustment: blend 60% toward target to avoid oscillation
+        tileSide = Math.max(16, Math.min(256,
+          Math.round(tileSide * 0.4 + wantSide * 0.6)));
+      }
 
-    // Yield: compositor gets a GPU-free window here.
-    await new Promise(resolve => setTimeout(resolve, 0));
+      x += tw;
+
+      // Yield after every tile: compositor gets a GPU-free window
+      await new Promise(r => setTimeout(r, 0));
+    }
+    y += tileSide; // use current (adapted) tileSide for next row of tiles
   }
 
   if (gen !== renderGen) return;
@@ -486,7 +497,7 @@ async function renderFractalToFBO(offset) {
   if (!fboAValid) {
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fboB.fbo);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, fboA.fbo);
-    gl.blitFramebuffer(0, 0, rw, rh, 0, 0, rw, rh, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
     fboAValid = true;
