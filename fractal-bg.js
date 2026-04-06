@@ -301,9 +301,7 @@ void main() {
     col = phongLighting(raypos, normal, viewDir);
     col *= ao * (0.4 + 0.6*shadow);
   } else {
-    // 背景：深色渐变
-    float t = smoothstep(0.0, 1.0, uv.y);
-    col = mix(vec3(0.02, 0.02, 0.04), vec3(0.04, 0.04, 0.08), t);
+    col = vec3(0.0);
   }
 
   // 色调映射 + gamma
@@ -463,7 +461,7 @@ void main() {
 
   // ── 尺寸 ───────────────────────────────────────────────────
   function getDrawSize() {
-    const dpr = Math.min(window.devicePixelRatio, 2.0) * 0.525;
+    const dpr = window.devicePixelRatio || 1;
     return [
       Math.floor(window.innerWidth  * dpr),
       Math.floor(window.innerHeight * dpr),

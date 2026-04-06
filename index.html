@@ -8,9 +8,7 @@
 .hero{min-height:100vh;display:flex;flex-direction:column;justify-content:flex-end;padding:2rem;padding-top:60px;position:relative;overflow:hidden}
 /* 分形 canvas 全屏背景 */
 #fractalCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:0;display:block}
-/* 分形上方叠一层渐变，让文字可读 */
-.hero-overlay{position:absolute;inset:0;z-index:1;pointer-events:none;
-  background:linear-gradient(to top,rgba(8,8,8,.92) 0%,rgba(8,8,8,.4) 40%,rgba(8,8,8,.15) 100%)}
+.hero-overlay{display:none}
 .hero-content{position:relative;z-index:2;max-width:1280px;margin:0 auto;width:100%}
 .hero-eyebrow{display:flex;align-items:center;gap:10px;margin-bottom:1.5rem;font-size:11px;font-weight:600;letter-spacing:.22em;text-transform:uppercase;color:var(--acc)}
 .hero-eyebrow::before{content:'';width:28px;height:1px;background:currentColor}
