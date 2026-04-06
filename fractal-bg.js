@@ -315,48 +315,53 @@ void main() {
   fragColor = vec4(col, 1.0);
 }`;
 
-  // ── 过渡动画显示着色器 ─────────────────────────────────────
-  // 基于 tile hash 的随机散开溶解，tile 边缘带蓝色闪光
+  // ── 过渡动画显示着色器（pixel sort 风格）──────────────────
+  // 每列以随机延迟启动：亮像素向上/下漂移形成条纹，波前带蓝白扫描线，
+  // 漂移峰值后新图渗入，envelope 归零后漂移消失不留残影
   const DISPLAY_FRAG_SRC = `#version 300 es
 precision highp float;
 in vec2 vUv;
 out vec4 fragColor;
 
-uniform sampler2D u_texA;      // 当前帧（旧）
-uniform sampler2D u_texB;      // 目标帧（新）
-uniform float     u_transition; // 0=全A, 1=全B
+uniform sampler2D u_texA;
+uniform sampler2D u_texB;
+uniform float     u_transition;
 uniform vec2      u_resolution;
 
-float hash(vec2 p) {
-  p = fract(p * vec2(127.34, 311.72));
-  p += dot(p, p + 45.32);
-  return fract(p.x * p.y);
+float hash1(float n) {
+  return fract(sin(n * 127.1) * 43758.5453);
 }
 
 void main() {
   vec2 uv = vUv;
 
-  // 快捷路径：过渡未开始或已结束
   if (u_transition <= 0.0) { fragColor = texture(u_texA, uv); return; }
   if (u_transition >= 1.0) { fragColor = texture(u_texB, uv); return; }
 
-  // 每个 tile(20px) 有独立的随机延迟
-  vec2 tileCoord = floor(gl_FragCoord.xy / 20.0);
-  float delay  = hash(tileCoord);          // [0, 1]
-  float tStart = delay * 0.55;
-  float tEnd   = tStart + 0.45;
-  float localT = clamp((u_transition - tStart) / (tEnd - tStart), 0.0, 1.0);
-  localT = smoothstep(0.0, 1.0, localT);
+  // 每 3px 一列，赋予随机启动延迟
+  float colId   = floor(gl_FragCoord.x / 3.0);
+  float colRand = hash1(colId);
+  float colDelay = colRand * 0.38;
+  float colT     = clamp((u_transition - colDelay) / (1.0 - colDelay), 0.0, 1.0);
 
-  vec4 colA = texture(u_texA, uv);
-  vec4 colB = texture(u_texB, uv);
+  // 采样旧图亮度，决定像素位移（亮 > 0.45 向上漂，暗 < 0.45 向下漂）
+  float luma    = dot(texture(u_texA, uv).rgb, vec3(0.2126, 0.7152, 0.0722));
+  float sortDir = (colRand > 0.5) ? 1.0 : -1.0;   // 列级随机方向
 
-  // tile 切换瞬间的蓝色闪光
-  float flash = exp(-pow((localT - 0.5) * 7.0, 2.0)) * 0.14;
-  vec4 col = mix(colA, colB, localT);
-  col.rgb += flash * vec3(0.35, 0.6, 1.0);
-  col.rgb  = clamp(col.rgb, 0.0, 1.0);
-  fragColor = col;
+  // 位移 envelope：sin 曲线保证 colT=0 和 1 时位移归零，不留残影
+  float envelope = sin(colT * 3.14159);
+  float shift    = (luma - 0.45) * sortDir * envelope * 0.52;
+
+  vec2  sortedUV  = vec2(uv.x, clamp(uv.y + shift, 0.001, 0.999));
+  vec4  colA_sort = texture(u_texA, sortedUV);
+
+  // 波前扫描线：colT ≈ 0.5 时出现蓝白闪光
+  float scanFlash  = exp(-pow((colT - 0.5) * 9.0, 2.0)) * 0.22;
+  colA_sort.rgb   += scanFlash * vec3(0.5, 0.72, 1.0);
+
+  // colT > 0.52 后新图逐渐渗入
+  float revealT = smoothstep(0.50, 0.90, colT);
+  fragColor = clamp(mix(colA_sort, texture(u_texB, uv), revealT), 0.0, 1.0);
 }`;
 
   // ── 内部状态 ───────────────────────────────────────────────
