@@ -10,7 +10,7 @@ void main(){
   vUv = (pos[gl_VertexID] + 1.0) * 0.5;
 }`;
 
-// ── Fractal fragment shader (unchanged) ───────────────────────────────────
+// ── Fractal fragment shader (完全不变) ────────────────────────────────────
 const FRAG_SRC = `#version 300 es
 precision highp float;
 
@@ -231,7 +231,7 @@ void main() {
   fragColor = vec4(col, 1.0);
 }`;
 
-// ── Pixel-sort transition shader (unchanged) ──────────────────────────────
+// ── Pixel-sort transition shader (不变) ───────────────────────────────────
 const DISPLAY_FRAG_SRC = `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -288,12 +288,10 @@ const MOUSE_STRENGTH = 0.285;
 const DEBOUNCE_MS    = 350;
 const TRANSITION_MS  = 900;
 
-// ── New: low-res & progressive settings ───────────────────────────────────
-const LOW_RES_FACTOR     = 0.25;          // 1/16 of pixels
-const HIGH_RES_TILE_SIZE = 48;            // small tiles for frequent yielding
-const TILE_YIELD_MS      = 4;             // ms to yield after each tile
+// Tile size – keep it small to yield frequently
+const TILE_SIZE = 64;
 
-// ── GL helpers (unchanged) ────────────────────────────────────────────────
+// ── GL helpers ─────────────────────────────────────────────────────────────
 function compileShader(g, type, src) {
   const s = g.createShader(type);
   g.shaderSource(s, src);
@@ -394,7 +392,7 @@ function drawDisplay(t) {
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 }
 
-// ── Improved transition loop using requestAnimationFrame ──────────────────
+// Transition loop using requestAnimationFrame (smooth and non‑blocking)
 function startTransitionLoop() {
   if (transitionTimer !== null) return;
   function tick() {
@@ -404,6 +402,7 @@ function startTransitionLoop() {
     if (t >= 1.0) {
       isTransitioning = false;
       transitionTimer = null;
+      // Swap buffers after transition finishes
       const tmp = fboA; fboA = fboB; fboB = tmp;
     } else {
       transitionTimer = requestAnimationFrame(tick);
@@ -412,108 +411,58 @@ function startTransitionLoop() {
   transitionTimer = requestAnimationFrame(tick);
 }
 
-// ── Low‑resolution fast feedback (1/16 pixels) ────────────────────────────
-async function renderLowRes(offset, w, h) {
-  const renderId = ++renderGen;
-  const lowW = Math.max(1, Math.floor(w * LOW_RES_FACTOR));
-  const lowH = Math.max(1, Math.floor(h * LOW_RES_FACTOR));
-
-  const lowFBO = makeFBO(gl, lowW, lowH);
-
-  gl.useProgram(fractalProg);
-  setFractalUniforms(gl, fractalUniforms, offset, lowW, lowH);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, lowFBO.fbo);
-  gl.viewport(0, 0, lowW, lowH);
-  gl.drawArrays(gl.TRIANGLES, 0, 3);
-  gl.flush();                       // submit, don't wait
-  await new Promise(r => setTimeout(r, 10)); // yield for UI
-
-  if (renderId !== renderGen) return false; // cancelled
-
-  // Upscale low-res to main FBO A and show immediately
-  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, lowFBO.fbo);
-  gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, fboA.fbo);
-  gl.blitFramebuffer(0, 0, lowW, lowH, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.LINEAR);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  drawDisplay(0.0);
-
-  gl.deleteFramebuffer(lowFBO.fbo);
-  gl.deleteTexture(lowFBO.tex);
-  return true;
-}
-
-// ── Progressive high‑resolution rendering (tiny tiles + yield) ────────────
-async function renderHighResProgressive(offset, w, h) {
-  const renderId = ++renderGen;
-  const tileSize = HIGH_RES_TILE_SIZE;
-
-  if (!fboB || fboB.w !== w || fboB.h !== h) {
-    fboB = makeFBO(gl, w, h);
-  }
-
-  gl.useProgram(fractalProg);
-  setFractalUniforms(gl, fractalUniforms, offset, w, h);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
-
-  for (let y = 0; y < h; y += tileSize) {
-    for (let x = 0; x < w; x += tileSize) {
-      if (renderId !== renderGen) return false;
-
-      const tw = Math.min(tileSize, w - x);
-      const th = Math.min(tileSize, h - y);
-
-      gl.enable(gl.SCISSOR_TEST);
-      gl.scissor(x, y, tw, th);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-      gl.disable(gl.SCISSOR_TEST);
-      gl.flush();                    // submit, don't wait
-
-      // Yield to let UI compositor run on GPU
-      await new Promise(r => setTimeout(r, TILE_YIELD_MS));
-    }
-  }
-
-  if (renderId !== renderGen) return false;
-
-  // All tiles done: swap buffers and start transition
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  const tmp = fboA; fboA = fboB; fboB = tmp;
-  fboAValid = true;
-  isTransitioning = true;
-  transitionStart = performance.now();
-  startTransitionLoop();
-  return true;
-}
-
-// ── Main entry: low‑res then background high‑res ──────────────────────────
-async function renderFractalToFBO(offset, immediateLowRes = true) {
+// ── Adaptive tiled fractal render – NO gl.finish(), always yield ──────────
+async function renderFractalToFBO(offset) {
   const w = canvas.width, h = canvas.height;
+  const gen = ++renderGen;
+
   if (!fboA || fboA.w !== w || fboA.h !== h) {
     fboA = makeFBO(gl, w, h);
     fboB = makeFBO(gl, w, h);
     fboAValid = false;
   }
 
-  // Cancel any ongoing render
-  renderGen++;
-  const myRenderId = renderGen;
-
-  // Stop any active transition
   if (isTransitioning) {
     isTransitioning = false;
     if (transitionTimer) cancelAnimationFrame(transitionTimer);
     transitionTimer = null;
-    drawDisplay(0.0);
+    const tmp = fboA; fboA = fboB; fboB = tmp;
   }
 
-  // 1. Fast low‑resolution preview (user sees immediate feedback)
-  if (immediateLowRes) {
-    const ok = await renderLowRes(offset, w, h);
-    if (!ok || myRenderId !== renderGen) return;
+  gl.useProgram(fractalProg);
+  setFractalUniforms(gl, fractalUniforms, offset, w, h);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
+  gl.viewport(0, 0, w, h);
+
+  for (let y = 0; y < h; y += TILE_SIZE) {
+    for (let x = 0; x < w; x += TILE_SIZE) {
+      if (gen !== renderGen) return; // cancelled
+
+      const tw = Math.min(TILE_SIZE, w - x);
+      const th = Math.min(TILE_SIZE, h - y);
+
+      gl.enable(gl.SCISSOR_TEST);
+      gl.scissor(x, y, tw, th);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.disable(gl.SCISSOR_TEST);
+      
+      // ★ No gl.finish() – only flush to submit commands
+      gl.flush();
+      
+      // Yield control – allows UI compositor to run
+      await new Promise(r => setTimeout(r, 0));
+    }
   }
 
-  // 2. Background progressive high‑resolution (does not block UI)
-  await renderHighResProgressive(offset, w, h);
+  if (gen !== renderGen) return;
+
+  // Rendering complete – swap buffers and start transition
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  fboAValid = true;
+  isTransitioning = true;
+  transitionStart = performance.now();
+  startTransitionLoop();
 }
 
 // ── Message handler ────────────────────────────────────────────────────────
@@ -549,23 +498,18 @@ self.addEventListener('message', (e) => {
     renderGen++; // Cancel any in-progress render
 
   } else if (type === 'mouseenter') {
-    if (!fboAValid) renderFractalToFBO([0, 0], true);
+    if (!fboAValid) renderFractalToFBO([0, 0]);
 
   } else if (type === 'mousemove') {
     pendingOffset[0] = (e.data.nx - 0.5) * MOUSE_STRENGTH;
     pendingOffset[1] = (e.data.ny - 0.5) * MOUSE_STRENGTH;
     clearTimeout(debounceTimer);
-    // Immediately show low‑res preview with new offset
-    renderFractalToFBO([pendingOffset[0], pendingOffset[1]], true);
-    // After debounce, render high‑res (without another low‑res)
     debounceTimer = setTimeout(() => {
-      renderFractalToFBO([pendingOffset[0], pendingOffset[1]], false);
+      renderFractalToFBO([pendingOffset[0], pendingOffset[1]]);
     }, DEBOUNCE_MS);
 
   } else if (type === 'mouseleave') {
     clearTimeout(debounceTimer);
     debounceTimer = null;
-    // Optionally render final high‑res version
-    renderFractalToFBO([pendingOffset[0], pendingOffset[1]], false);
   }
 });
