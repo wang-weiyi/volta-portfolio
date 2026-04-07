@@ -206,7 +206,7 @@ void main() {
 
   vec3 raypos = ro;
   bool hit = false;
-  for (int i = 0; i < 600; i++) {
+  for (int i = 0; i < 512; i++) {
     float dist = sdf(raypos);
     if (dist < 0.000001) { hit = true; break; }
     if (length(raypos - ro) > 60.0) break;
