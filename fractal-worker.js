@@ -367,7 +367,7 @@ function setFractalUniforms(g, u, offset, rw, rh) {
   g.uniform3f(u.u_lightColor,       1.0,   1.0,   1.0);
   g.uniform3f(u.u_ambientColor,     0.3,   0.3,   0.3);
   g.uniform3f(u.u_materialColor,    0.9,   0.9,   0.9);
-  g.uniform1f(u.u_shininess,        93.0);
+  g.uniform1f(u.u_shininess,        16.0);
   g.uniform1f(u.u_ambientStrength,  0.39);
   g.uniform1f(u.u_specularStrength, 2.76);
   g.uniform3f(u.u_camPos,           6.1788, 1.4962, 5.7053);
