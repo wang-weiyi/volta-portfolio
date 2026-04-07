@@ -9,6 +9,13 @@
 /* 分形 canvas 全屏背景 */
 #fractalCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:0;display:block}
 .hero-overlay{display:none}
+/* 分形 HUD */
+.fractal-hud{position:absolute;top:72px;right:2rem;z-index:10;display:flex;flex-direction:column;align-items:flex-end;gap:5px;pointer-events:none;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.fractal-hud-coords{font-size:11px;color:rgba(237,233,222,.55);background:rgba(0,0,0,.28);backdrop-filter:blur(6px);padding:4px 10px;border-radius:5px;letter-spacing:.04em;display:flex;gap:14px;transition:opacity .2s}
+.fractal-hud-hint{font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;color:rgba(237,233,222,.28);transition:opacity .3s}
+.fractal-hud-computing{display:flex;align-items:center;gap:7px;font-size:10.5px;color:rgba(200,255,0,.85);background:rgba(0,0,0,.38);backdrop-filter:blur(6px);padding:4px 10px;border-radius:5px;letter-spacing:.08em}
+.fractal-spinner{width:7px;height:7px;border-radius:50%;background:currentColor;animation:fpulse .75s ease-in-out infinite alternate}
+@keyframes fpulse{from{opacity:.25;transform:scale(.7)}to{opacity:1;transform:scale(1.3)}}
 .hero-content{position:relative;z-index:2;max-width:1280px;margin:0 auto;width:100%}
 .hero-eyebrow{display:flex;align-items:center;gap:10px;margin-bottom:1.5rem;font-size:11px;font-weight:600;letter-spacing:.22em;text-transform:uppercase;color:var(--acc)}
 .hero-eyebrow::before{content:'';width:28px;height:1px;background:currentColor}
@@ -80,6 +87,15 @@
 
 <section class="hero">
   <canvas id="fractalCanvas"></canvas>
+  <div class="fractal-hud" id="fractalHUD">
+    <div class="fractal-hud-coords" id="fractalCoords" style="opacity:0">
+      <span id="fractalX">x: 0.500</span><span id="fractalY">y: 0.500</span>
+    </div>
+    <div class="fractal-hud-hint" id="fractalHint">点击以更新分形</div>
+    <div class="fractal-hud-computing" id="fractalComputing" style="display:none">
+      <span class="fractal-spinner"></span>正在重新计算…
+    </div>
+  </div>
   <div class="hero-overlay"></div>
   <div class="hero-content">
     <div class="hero-eyebrow">3D 数字艺术家</div>

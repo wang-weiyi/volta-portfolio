@@ -452,11 +452,13 @@ function renderFractalToFBO() {
       const tmp = fboA; fboA = fboB; fboB = tmp;
       drawDisplay(0.0);
       gl.flush();
+      self.postMessage({ type: 'renderDone' });
       return;
     }
     isTransitioning = true;
     transitionStart = performance.now();
     startTransitionLoop();
+    self.postMessage({ type: 'renderDone' });
   }, 3000); // wait 3s — generous budget for heavy shader on any GPU
 }
 
