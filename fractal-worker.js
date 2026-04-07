@@ -185,12 +185,11 @@ vec3 phongLighting(vec3 p, vec3 normal, vec3 viewDir) {
 }
 
 vec3 aces(vec3 x) {
-  float a=2.51, b=0.03, c=2.43, d=0.59, e=0.14;
+  float a=4.27, b=0.03, c=1.34, d=0.59, e=0.14;
   return clamp((x*(a*x+b))/(x*(c*x+d)+e), 0.0, 1.0);
 }
 
-void main() {
-  vec2 uv = vUv;
+vec3 renderPixel(vec2 uv) {
   vec3 ro  = u_camPos;
   vec3 target = vec3(7.9, 0.0, 1.55);
   vec3 fwd = normalize(target - ro);
@@ -228,6 +227,20 @@ void main() {
 
   col  = aces(col * 1.2);
   col  = pow(col, vec3(1.0/2.2));
+  return col;
+}
+
+void main() {
+  vec2 uv = vUv;
+  vec2 px = 1.0 / u_resolution;
+
+  // 4x SSAA: 2x2 grid
+  vec3 col  = renderPixel(uv + px * vec2(-0.25, -0.25));
+       col += renderPixel(uv + px * vec2( 0.25, -0.25));
+       col += renderPixel(uv + px * vec2(-0.25,  0.25));
+       col += renderPixel(uv + px * vec2( 0.25,  0.25));
+  col *= 0.25;
+
   col *= 1.0 - 0.4 * pow(length(uv*2.0-1.0), 2.0);
   fragColor = vec4(col, 1.0);
 }`;
@@ -368,7 +381,7 @@ function setFractalUniforms(g, u, offset, rw, rh) {
   g.uniform3f(u.u_ambientColor,     0.3,   0.3,   0.3);
   g.uniform3f(u.u_materialColor,    0.9,   0.9,   0.9);
   g.uniform1f(u.u_shininess,        16.0);
-  g.uniform1f(u.u_ambientStrength,  0.39);
+  g.uniform1f(u.u_ambientStrength,  1.0);
   g.uniform1f(u.u_specularStrength, 2.76);
   g.uniform3f(u.u_camPos,           6.1788, 1.4962, 5.7053);
   g.uniform1f(u.u_fov,              60.0 * Math.PI / 180.0);
