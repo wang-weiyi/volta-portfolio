@@ -189,11 +189,18 @@ self.addEventListener('message', (e) => {
     canvas.height = e.data.h;
 
     gl = canvas.getContext('webgl2', { antialias: false, alpha: false });
-    if (!gl) { console.error('[fractal-worker] WebGL2 not supported'); return; }
+    if (!gl) {
+      console.error('[fractal-worker] WebGL2 not supported');
+      self.postMessage({ type: 'initError', reason: 'WebGL2 not supported on OffscreenCanvas' });
+      return;
+    }
 
     fractalProg = FC.buildProgram(gl, FC.VERT_SRC, FC.FRAG_SRC_HQ);
     displayProg = FC.buildProgram(gl, FC.VERT_SRC, FC.DISPLAY_FRAG_SRC);
-    if (!fractalProg || !displayProg) return;
+    if (!fractalProg || !displayProg) {
+      self.postMessage({ type: 'initError', reason: 'Shader compilation failed' });
+      return;
+    }
 
     fractalUniforms = FC.cacheFractalUniforms(gl, fractalProg);
     displayUniforms = {
@@ -202,6 +209,8 @@ self.addEventListener('message', (e) => {
       u_transition: gl.getUniformLocation(displayProg, 'u_transition'),
       u_resolution: gl.getUniformLocation(displayProg, 'u_resolution'),
     };
+
+    self.postMessage({ type: 'initOK' });
 
   } else if (type === 'resize') {
     if (!canvas) return;

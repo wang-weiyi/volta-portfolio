@@ -14,6 +14,27 @@ const FractalBG = (() => {
     ];
   }
 
+  // 在主线程测试 OffscreenCanvas + WebGL2 是否真正可用
+  function canWorkerRender() {
+    try {
+      if (typeof OffscreenCanvas === 'undefined') return false;
+      const c = new OffscreenCanvas(1, 1);
+      const gl = c.getContext('webgl2');
+      if (!gl) return false;
+      // 测试 #version 300 es 着色器能否编译
+      const s = gl.createShader(gl.FRAGMENT_SHADER);
+      gl.shaderSource(s, '#version 300 es\nprecision highp float;\nout vec4 o;\nvoid main(){o=vec4(1);}');
+      gl.compileShader(s);
+      const ok = gl.getShaderParameter(s, gl.COMPILE_STATUS);
+      gl.deleteShader(s);
+      const ext = gl.getExtension('WEBGL_lose_context');
+      if (ext) ext.loseContext();
+      return ok;
+    } catch (e) {
+      return false;
+    }
+  }
+
   // ── HUD helpers ───────────────────────────────────────────
   const hud = {
     el:        null,
@@ -74,7 +95,6 @@ const FractalBG = (() => {
     });
     heroSection.addEventListener('mouseleave', () => hud.hideCoords());
 
-    // Touch support for mobile
     heroSection.addEventListener('touchmove', (e) => {
       const touch = e.touches[0];
       const rect = canvas.getBoundingClientRect();
@@ -100,6 +120,16 @@ const FractalBG = (() => {
     };
   }
 
+  // ── 替换已被 transferControlToOffscreen 占用的 canvas ──────
+  function replaceCanvas(oldCanvas) {
+    const newCanvas = document.createElement('canvas');
+    newCanvas.id = oldCanvas.id;
+    newCanvas.className = oldCanvas.className;
+    newCanvas.style.cssText = oldCanvas.style.cssText;
+    oldCanvas.parentNode.replaceChild(newCanvas, oldCanvas);
+    return newCanvas;
+  }
+
   // ================================================================
   // PATH A — OffscreenCanvas + Worker (desktop / modern browsers)
   // ================================================================
@@ -112,25 +142,68 @@ const FractalBG = (() => {
 
     worker = new Worker('fractal-worker.js');
     worker.postMessage({ type: 'init', canvas: offscreen, w, h }, [offscreen]);
-    worker.postMessage({ type: 'mouseenter' });
+
+    let initResolved = false;
+    let eventsWired = false;
+
+    // 超时：Worker 3 秒内没回报 → 降级
+    const timeout = setTimeout(() => {
+      if (!initResolved) {
+        initResolved = true;
+        console.warn('FractalBG: Worker init timeout, falling back to main thread');
+        worker.terminate(); worker = null;
+        fallbackToMainThread(canvas);
+      }
+    }, 3000);
 
     worker.onmessage = (e) => {
-      if (e.data.type === 'renderDone') hud.setComputing(false);
+      if (e.data.type === 'initOK' && !initResolved) {
+        initResolved = true;
+        clearTimeout(timeout);
+        // Worker 初始化成功，触发首次渲染并绑定事件
+        worker.postMessage({ type: 'mouseenter' });
+        if (!eventsWired) {
+          eventsWired = true;
+          wireEvents(canvas,
+            () => {
+              const [nw, nh] = getDrawSize();
+              canvas.style.width  = window.innerWidth  + 'px';
+              canvas.style.height = window.innerHeight + 'px';
+              worker.postMessage({ type: 'resize', w: nw, h: nh });
+            },
+            makeClickHandler(canvas, (nx, ny) => {
+              worker.postMessage({ type: 'click', nx, ny });
+            }),
+          );
+        }
+      } else if (e.data.type === 'initError' && !initResolved) {
+        initResolved = true;
+        clearTimeout(timeout);
+        console.warn('FractalBG: Worker init failed:', e.data.reason, '— falling back');
+        worker.terminate(); worker = null;
+        fallbackToMainThread(canvas);
+      } else if (e.data.type === 'renderDone') {
+        hud.setComputing(false);
+      }
     };
 
-    wireEvents(canvas,
-      () => {
-        const [nw, nh] = getDrawSize();
-        canvas.style.width  = window.innerWidth  + 'px';
-        canvas.style.height = window.innerHeight + 'px';
-        worker.postMessage({ type: 'resize', w: nw, h: nh });
-      },
-      makeClickHandler(canvas, (nx, ny) => {
-        worker.postMessage({ type: 'click', nx, ny });
-      }),
-    );
+    worker.onerror = (err) => {
+      if (!initResolved) {
+        initResolved = true;
+        clearTimeout(timeout);
+        console.warn('FractalBG: Worker error:', err.message, '— falling back');
+        worker.terminate(); worker = null;
+        fallbackToMainThread(canvas);
+      }
+    };
+  }
 
-    return true;
+  function fallbackToMainThread(oldCanvas) {
+    console.info('FractalBG: using main-thread WebGL2 fallback');
+    // canvas 的控制权已转移给 Worker，需要创建新 canvas
+    const newCanvas = replaceCanvas(oldCanvas);
+    hud.init(newCanvas);
+    initMainThreadPath(newCanvas);
   }
 
   // ================================================================
@@ -172,14 +245,12 @@ const FractalBG = (() => {
       return false;
     }
 
-    // 监听 GPU context lost（移动端 GPU 超时会触发）
     canvas.addEventListener('webglcontextlost', (e) => {
       e.preventDefault();
-      console.warn('FractalBG: WebGL context lost — GPU likely timed out');
+      console.warn('FractalBG: WebGL context lost');
       hud.setComputing(false);
     });
 
-    // 使用 LITE 着色器（128 步光线步进，3 步 AO，16 步阴影，单采样）
     fractalProg = FC.buildProgram(gl, FC.VERT_SRC, FC.FRAG_SRC_LITE);
     displayProg = FC.buildProgram(gl, FC.VERT_SRC, FC.DISPLAY_FRAG_SRC);
     if (!fractalProg || !displayProg) {
@@ -226,7 +297,6 @@ const FractalBG = (() => {
         const tmp = fboA; fboA = fboB; fboB = tmp;
       }
 
-      // 渲染到 fboB
       gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
       gl.viewport(0, 0, w, h);
       gl.useProgram(fractalProg);
@@ -235,7 +305,6 @@ const FractalBG = (() => {
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
       if (!fboAValid) {
-        // 首次渲染：拷贝到 fboA 并直接展示
         gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fboB.fbo);
         gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, fboA.fbo);
         gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
@@ -245,7 +314,6 @@ const FractalBG = (() => {
         const tmp = fboA; fboA = fboB; fboB = tmp;
         drawDisplay(0.0);
       } else {
-        // 过渡动画
         isTransitioning = true;
         transitionStart = performance.now();
         function tick() {
@@ -266,7 +334,6 @@ const FractalBG = (() => {
       hud.setComputing(false);
     }
 
-    // 初始渲染
     renderFractal();
 
     wireEvents(canvas,
@@ -297,16 +364,18 @@ const FractalBG = (() => {
 
       hud.init(canvas);
 
-      // 优先 OffscreenCanvas + Worker
-      if (canvas.transferControlToOffscreen) {
+      // 尝试 Worker 路径：需要 transferControlToOffscreen 且 OffscreenCanvas 支持 WebGL2
+      if (canvas.transferControlToOffscreen && canWorkerRender()) {
         try {
-          return initWorkerPath(canvas);
+          initWorkerPath(canvas);
+          return true;
         } catch (err) {
-          console.warn('FractalBG: Worker path failed, falling back to main thread', err);
+          console.warn('FractalBG: Worker path threw:', err);
+          // canvas 可能已被 transfer，需要替换
         }
       }
 
-      // 回退到主线程渲染
+      // 直接走主线程渲染
       console.info('FractalBG: using main-thread WebGL2 fallback');
       return initMainThreadPath(canvas);
     },
