@@ -12,8 +12,18 @@ void main(){
   vUv = (pos[gl_VertexID] + 1.0) * 0.5;
 }`;
 
-// Fragment shader body (everything except main)
-const FRAG_BODY = `#version 300 es
+// Parameterised fragment shader body (everything except main)
+// marchSteps  — ray march loop limit (desktop 512, mobile 128)
+// aoSteps     — ambient occlusion samples (desktop 8, mobile 3)
+// shadowSteps — soft shadow samples (desktop 64, mobile 16)
+// hitEps      — ray-hit epsilon (desktop 1e-6, mobile 1e-4)
+function makeFractalBody(opts) {
+  const ms  = (opts && opts.marchSteps)  || 512;
+  const ao  = (opts && opts.aoSteps)     || 8;
+  const ss  = (opts && opts.shadowSteps) || 64;
+  const eps = (opts && opts.hitEps)      || 0.000001;
+
+  return `#version 300 es
 precision highp float;
 
 in vec2 vUv;
@@ -156,7 +166,7 @@ vec3 calcNormal(vec3 p) {
 
 float calcAO(vec3 p, vec3 n) {
   float dist = 0.002, occ = 1.0;
-  for (int i = 0; i < 8; i++) {
+  for (int i = 0; i < ${ao}; i++) {
     occ = min(occ, sdf(p + dist*n) / dist);
     dist *= 2.0;
   }
@@ -165,7 +175,7 @@ float calcAO(vec3 p, vec3 n) {
 
 float softShadow(vec3 ro, vec3 rd, float mint, float maxt, float w) {
   float res = 1.0, ph = 1e20, t = mint;
-  for (int i = 0; i < 64 && t < maxt; i++) {
+  for (int i = 0; i < ${ss} && t < maxt; i++) {
     float h = sdf(ro + rd*t);
     if (h < 0.001) return 0.0;
     float y = h*h / (2.0*ph);
@@ -207,9 +217,9 @@ vec3 renderPixel(vec2 uv) {
 
   vec3 raypos = ro;
   bool hit = false;
-  for (int i = 0; i < 512; i++) {
+  for (int i = 0; i < ${ms}; i++) {
     float dist = sdf(raypos);
-    if (dist < 0.000001) { hit = true; break; }
+    if (dist < ${eps.toFixed(7)}) { hit = true; break; }
     if (length(raypos - ro) > 60.0) break;
     raypos += dist * rd;
   }
@@ -232,6 +242,7 @@ vec3 renderPixel(vec2 uv) {
   return col;
 }
 `;
+}
 
 // 4x SSAA main (desktop / worker)
 const FRAG_MAIN_HQ = `
@@ -247,7 +258,7 @@ void main() {
   fragColor = vec4(col, 1.0);
 }`;
 
-// 1-sample main (mobile fallback — much lighter on GPU)
+// 1-sample main (mobile fallback)
 const FRAG_MAIN_LITE = `
 void main() {
   vec2 uv = vUv;
@@ -379,10 +390,14 @@ function setFractalUniforms(g, u, offset, rw, rh) {
   g.uniform1f(u.u_fov,              60.0 * Math.PI / 180.0);
 }
 
+// Pre-built shader sources
+const FRAG_SRC_HQ   = makeFractalBody({ marchSteps: 512, aoSteps: 8, shadowSteps: 64, hitEps: 0.000001 }) + FRAG_MAIN_HQ;
+const FRAG_SRC_LITE  = makeFractalBody({ marchSteps: 128, aoSteps: 3, shadowSteps: 16, hitEps: 0.0001   }) + FRAG_MAIN_LITE;
+
 return {
   VERT_SRC,
-  FRAG_SRC_HQ:   FRAG_BODY + FRAG_MAIN_HQ,
-  FRAG_SRC_LITE:  FRAG_BODY + FRAG_MAIN_LITE,
+  FRAG_SRC_HQ,
+  FRAG_SRC_LITE,
   DISPLAY_FRAG_SRC,
   compileShader,
   buildProgram,
@@ -393,5 +408,4 @@ return {
 
 })();
 
-// Make available in Worker scope (importScripts) and main thread
 if (typeof self !== 'undefined') self.FractalCore = FractalCore;

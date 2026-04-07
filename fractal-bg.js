@@ -139,8 +139,8 @@ const FractalBG = (() => {
   function initMainThreadPath(canvas) {
     const FC = FractalCore;
 
-    // 移动端降低渲染分辨率，避免 GPU 超时
-    const RES_SCALE = 0.5;
+    // 移动端大幅降低渲染分辨率，配合 LITE 着色器避免 GPU 超时
+    const RES_SCALE = 0.35;
     const MOUSE_STRENGTH = 0.285;
     const TRANSITION_MS  = 1800;
 
@@ -165,14 +165,21 @@ const FractalBG = (() => {
 
     applySize();
 
-    gl = canvas.getContext('webgl2', { antialias: false, alpha: false });
+    gl = canvas.getContext('webgl2', { antialias: false, alpha: false, powerPreference: 'low-power' });
     if (!gl) {
       console.warn('FractalBG: WebGL2 not supported');
       canvas.style.display = 'none';
       return false;
     }
 
-    // 使用 LITE 着色器（单采样，无 SSAA）
+    // 监听 GPU context lost（移动端 GPU 超时会触发）
+    canvas.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault();
+      console.warn('FractalBG: WebGL context lost — GPU likely timed out');
+      hud.setComputing(false);
+    });
+
+    // 使用 LITE 着色器（128 步光线步进，3 步 AO，16 步阴影，单采样）
     fractalProg = FC.buildProgram(gl, FC.VERT_SRC, FC.FRAG_SRC_LITE);
     displayProg = FC.buildProgram(gl, FC.VERT_SRC, FC.DISPLAY_FRAG_SRC);
     if (!fractalProg || !displayProg) {
