@@ -291,16 +291,21 @@ void main() {
   float colDelay = colRand * 0.38;
   float colT     = clamp((u_transition - colDelay) / (1.0 - colDelay), 0.0, 1.0);
 
-  float luma     = dot(texture(u_texA, uv).rgb, vec3(0.2126, 0.7152, 0.0722));
   float sortDir  = (colRand > 0.5) ? 1.0 : -1.0;
   float envelope = sin(colT * 3.14159);
-  float shift    = (luma - 0.45) * sortDir * envelope * 0.52;
 
-  vec2  sortedUV  = vec2(uv.x, clamp(uv.y + shift, 0.001, 0.999));
-  vec4  colA_sort = texture(u_texA, sortedUV);
+  float lumaA    = dot(texture(u_texA, uv).rgb, vec3(0.2126, 0.7152, 0.0722));
+  float shiftA   = (lumaA - 0.45) * sortDir * envelope * 0.52;
+  vec2  sortedUV_A = vec2(uv.x, clamp(uv.y + shiftA, 0.001, 0.999));
+  vec4  colA_sort  = texture(u_texA, sortedUV_A);
 
-  float revealT = smoothstep(0.50, 0.90, colT);
-  fragColor = clamp(mix(colA_sort, texture(u_texB, uv), revealT), 0.0, 1.0);
+  float lumaB    = dot(texture(u_texB, uv).rgb, vec3(0.2126, 0.7152, 0.0722));
+  float shiftB   = (lumaB - 0.45) * sortDir * envelope * 0.52;
+  vec2  sortedUV_B = vec2(uv.x, clamp(uv.y + shiftB, 0.001, 0.999));
+  vec4  colB_sort  = texture(u_texB, sortedUV_B);
+
+  float revealT = smoothstep(0.40, 0.60, colT);
+  fragColor = clamp(mix(colA_sort, colB_sort, revealT), 0.0, 1.0);
 }`;
 
 // ── GL helpers ────────────────────────────────────────────────────────────
