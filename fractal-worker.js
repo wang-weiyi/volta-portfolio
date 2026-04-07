@@ -178,8 +178,9 @@ vec3 phongLighting(vec3 p, vec3 normal, vec3 viewDir) {
   vec3 ld     = normalize(-u_lightDir);
   vec3 ambient = u_ambientStrength * u_ambientColor;
   float diff  = max(dot(normal, ld), 0.0);
-  vec3 reflDir = reflect(ld, normal);
-  float spec  = pow(max(dot(viewDir, reflDir), 0.0), u_shininess);
+  vec3 reflDir = reflect(-ld, normal);
+  float normFactor = (u_shininess + 2.0) / (2.0 * 3.14159265);
+  float spec  = normFactor * pow(max(dot(viewDir, reflDir), 0.0), u_shininess);
   return (ambient + diff * u_lightColor + u_specularStrength * spec * u_lightColor) * u_materialColor;
 }
 

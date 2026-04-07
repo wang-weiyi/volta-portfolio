@@ -10,7 +10,7 @@
       display: flex;
       height: 100vh;
       overflow: hidden;
-      background: #111;
+      background: #000;
       color: #ccc;
       font-family: 'Consolas', 'Monaco', monospace;
       font-size: 12px;
@@ -399,8 +399,9 @@ vec3 phongLighting(vec3 p, vec3 normal, vec3 viewDir) {
   vec3 ld      = normalize(-u_lightDir);
   vec3 ambient = u_ambientStrength * u_ambientColor;
   float diff   = max(dot(normal, ld), 0.0);
-  vec3 reflDir = reflect(ld, normal);
-  float spec   = pow(max(dot(viewDir, reflDir), 0.0), u_shininess);
+  vec3 reflDir = reflect(-ld, normal);
+  float normFactor = (u_shininess + 2.0) / (2.0 * 3.14159265);
+  float spec   = normFactor * pow(max(dot(viewDir, reflDir), 0.0), u_shininess);
   return (ambient + diff * u_lightColor + u_specularStrength * spec * u_lightColor) * u_materialColor;
 }
 
@@ -432,7 +433,7 @@ void main() {
   for (int i = 0; i < 512; i++) {
     if (i >= u_rmSteps) break;
     float dist = sdf(raypos);
-    if (dist < 0.0001) { hit = true; break; }
+    if (dist < 0.000001) { hit = true; break; }
     if (length(raypos - ro) > 60.0) break;
     raypos += dist * rd;
   }
@@ -448,8 +449,7 @@ void main() {
     col  = phongLighting(raypos, normal, viewDir);
     col *= ao * (0.4 + 0.6 * shadow);
   } else {
-    float t = smoothstep(0.0, 1.0, uv.y);
-    col = mix(vec3(0.02, 0.02, 0.04), vec3(0.04, 0.04, 0.08), t);
+    col = vec3(0.0);
   }
 
   col  = aces(col * 1.2);
@@ -492,7 +492,7 @@ const DEFAULTS = {
   fov: 60.0,
   // Render
   renderScale: 1.05,
-  rmSteps: 389,
+  rmSteps: 600,
   mouseStrength: 0.285,
 };
 
@@ -652,39 +652,38 @@ canvas.addEventListener('mousedown', (e) => {
 });
 
 canvas.addEventListener('mousemove', (e) => {
-  if (isDragging) {
-    const dx = e.clientX - lastDragX;
-    const dy = e.clientY - lastDragY;
-    lastDragX = e.clientX;
-    lastDragY = e.clientY;
+  if (!isDragging) return;
+  const dx = e.clientX - lastDragX;
+  const dy = e.clientY - lastDragY;
+  lastDragX = e.clientX;
+  lastDragY = e.clientY;
 
-    P.camTheta -= dx * 0.35;
-    P.camPhi    = Math.max(-89, Math.min(89, P.camPhi + dy * 0.25));
+  P.camTheta -= dx * 0.35;
+  P.camPhi    = Math.max(-89, Math.min(89, P.camPhi + dy * 0.25));
 
-    // 同步滑条显示
-    if (sliderMap.camTheta) {
-      sliderMap.camTheta.slider.value = P.camTheta;
-      sliderMap.camTheta.num.value    = P.camTheta.toFixed(1);
-    }
-    if (sliderMap.camPhi) {
-      sliderMap.camPhi.slider.value = P.camPhi;
-      sliderMap.camPhi.num.value    = P.camPhi.toFixed(1);
-    }
-    scheduleRender();
-  } else {
-    const rect = canvas.getBoundingClientRect();
-    mouseOffset[0] = ((e.clientX - rect.left)  / rect.width  - 0.5) * P.mouseStrength;
-    mouseOffset[1] = ((e.clientY - rect.top)   / rect.height - 0.5) * P.mouseStrength;
-    scheduleRender();
+  // 同步滑条显示
+  if (sliderMap.camTheta) {
+    sliderMap.camTheta.slider.value = P.camTheta;
+    sliderMap.camTheta.num.value    = P.camTheta.toFixed(1);
   }
+  if (sliderMap.camPhi) {
+    sliderMap.camPhi.slider.value = P.camPhi;
+    sliderMap.camPhi.num.value    = P.camPhi.toFixed(1);
+  }
+  scheduleRender();
+});
+
+canvas.addEventListener('click', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  mouseOffset[0] = ((e.clientX - rect.left)  / rect.width  - 0.5) * P.mouseStrength;
+  mouseOffset[1] = ((e.clientY - rect.top)   / rect.height - 0.5) * P.mouseStrength;
+  scheduleRender();
 });
 
 canvas.addEventListener('mouseup',   () => { isDragging = false; canvas.classList.remove('dragging'); });
 canvas.addEventListener('mouseleave',() => {
   isDragging = false;
   canvas.classList.remove('dragging');
-  mouseOffset[0] = 0; mouseOffset[1] = 0;
-  scheduleRender();
 });
 
 canvas.addEventListener('wheel', (e) => {
