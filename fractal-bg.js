@@ -62,6 +62,13 @@ const FractalBG = (() => {
         });
       });
 
+      // ── 滚轮事件：累计滚动距离，发送给 Worker 更新光照方向 ──
+      let totalScrollY = 0;
+      window.addEventListener('wheel', (e) => {
+        totalScrollY += e.deltaY;
+        worker.postMessage({ type: 'scroll', totalY: totalScrollY });
+      }, { passive: true });
+
       return true;
     },
 

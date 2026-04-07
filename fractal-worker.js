@@ -288,6 +288,22 @@ const MOUSE_STRENGTH = 0.285;
 const DEBOUNCE_MS    = 350;
 const TRANSITION_MS  = 900;
 
+// 光照基准方向与滚轮参数
+const BASE_LIGHT_DIR  = [-0.69, -0.23, -0.2];
+const SCROLL_SPEED    = 0.0008; // 每像素滚动对应的旋转弧度
+
+// 当前渲染状态（由点击和滚轮共同驱动）
+let currentOffset  = [0, 0];
+let currentScrollY = 0;
+
+// 根据累计滚动量在 XZ 平面内旋转光照方向
+function calcLightDir(scrollY) {
+  const angle = scrollY * SCROLL_SPEED;
+  const cos = Math.cos(angle), sin = Math.sin(angle);
+  const x = BASE_LIGHT_DIR[0], z = BASE_LIGHT_DIR[2];
+  return [x * cos - z * sin, BASE_LIGHT_DIR[1], x * sin + z * cos];
+}
+
 
 // ── GL helpers ─────────────────────────────────────────────────────────────
 function compileShader(g, type, src) {
@@ -346,7 +362,7 @@ function cacheFractalUniforms(g, p) {
   return out;
 }
 
-function setFractalUniforms(g, u, offset, rw, rh) {
+function setFractalUniforms(g, u, offset, rw, rh, lightDir) {
   g.uniform1f(u.u_time, 0.0);
   g.uniform2f(u.u_resolution, rw, rh);
   g.uniform3f(u.u_juliaC,           0.345, 0.557, 0.0);
@@ -363,7 +379,7 @@ function setFractalUniforms(g, u, offset, rw, rh) {
   g.uniform1f(u.u_zOffset,          0.0);
   g.uniform1f(u.u_zOffset2,         0.0);
   g.uniform1f(u.u_proj,             1.0);
-  g.uniform3f(u.u_lightDir,        -0.69, -0.23, -0.2);
+  g.uniform3f(u.u_lightDir,         lightDir[0], lightDir[1], lightDir[2]);
   g.uniform3f(u.u_lightColor,       1.0,   1.0,   1.0);
   g.uniform3f(u.u_ambientColor,     0.3,   0.3,   0.3);
   g.uniform3f(u.u_materialColor,    0.9,   0.9,   0.9);
@@ -408,7 +424,7 @@ function startTransitionLoop() {
   transitionTimer = setTimeout(tick, 16);
 }
 
-function renderFractalToFBO(offset) {
+function renderFractalToFBO() {
   const w = canvas.width, h = canvas.height;
   ++renderGen;
 
@@ -425,12 +441,14 @@ function renderFractalToFBO(offset) {
     const tmp = fboA; fboA = fboB; fboB = tmp;
   }
 
+  const lightDir = calcLightDir(currentScrollY);
+
   // Single full-frame draw into fboB. GPU executes asynchronously.
   // flush() pushes commands without blocking worker or GPU process.
   gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
   gl.viewport(0, 0, w, h);
   gl.useProgram(fractalProg);
-  setFractalUniforms(gl, fractalUniforms, offset, w, h);
+  setFractalUniforms(gl, fractalUniforms, currentOffset, w, h, lightDir);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.flush();
@@ -494,11 +512,16 @@ self.addEventListener('message', (e) => {
     renderGen++; // Cancel any in-progress tiled render
 
   } else if (type === 'mouseenter') {
-    if (!fboAValid) renderFractalToFBO([0, 0]);
+    if (!fboAValid) renderFractalToFBO();
 
   } else if (type === 'click') {
-    const ox = (e.data.nx - 0.5) * MOUSE_STRENGTH;
-    const oy = (e.data.ny - 0.5) * MOUSE_STRENGTH;
-    renderFractalToFBO([ox, oy]);
+    currentOffset[0] = (e.data.nx - 0.5) * MOUSE_STRENGTH;
+    currentOffset[1] = (e.data.ny - 0.5) * MOUSE_STRENGTH;
+    renderFractalToFBO();
+
+  } else if (type === 'scroll') {
+    currentScrollY = e.data.totalY;
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => renderFractalToFBO(), DEBOUNCE_MS);
   }
 });
