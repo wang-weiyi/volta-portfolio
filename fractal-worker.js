@@ -288,14 +288,12 @@ const MOUSE_STRENGTH = 0.285;
 const DEBOUNCE_MS    = 350;
 const TRANSITION_MS  = 900;
 
-// Fixed tile size: small enough that each drawArrays is a short GPU job.
-// The compositor can interleave its work between tiles at the driver level.
+// Small tiles so each drawArrays is a short GPU job.
 const TILE_SIZE = 64;
 
-// Delay between tiles (ms). Gives compositor guaranteed GPU-free windows.
-// Total render time = (w*h / TILE_SIZE^2) * (gpu_per_tile + TILE_YIELD_MS).
-// For 3840×2160 @ 64px tiles ≈ 2000 tiles × ~20ms = ~40s. Slow but jank-free.
-const TILE_YIELD_MS = 16;
+// After GPU finishes each tile, idle this long before submitting next tile.
+// Compositor uses this guaranteed GPU-free window to render UI.
+const COMPOSITOR_GAP_MS = 8;
 
 // ── GL helpers ─────────────────────────────────────────────────────────────
 function compileShader(g, type, src) {
@@ -416,26 +414,47 @@ function startTransitionLoop() {
   transitionTimer = setTimeout(tick, 16);
 }
 
-// ── Tiled fractal render (no GPU sync) ────────────────────────────────────
+// ── Tiled fractal render (fenceSync, zero GPU-process blocking) ───────────
 //
-// Why gl.finish() caused jank:
-//   Chrome routes ALL GPU work (WebGL + compositor) through a single GPU
-//   process. gl.finish() forces a synchronous round-trip to the GPU process,
-//   during which the GPU process cannot service compositor requests.
-//   Hundreds of finish() calls = hundreds of GPU-process stalls = jank.
+// Why all previous approaches failed:
 //
-// This version never calls gl.finish(). Instead:
-//   1. Submit one small tile via drawArrays
-//   2. gl.flush() — push commands to GPU, return immediately (non-blocking)
-//   3. setTimeout(TILE_YIELD_MS) — sleep the worker for one full frame
-//      During this sleep:
-//        - GPU executes our tile asynchronously
-//        - Compositor submits & executes its own work
-//        - Main thread is completely free
-//   4. Next tile
+// gl.finish() per tile:
+//   Blocks Chrome's GPU process. Compositor goes through the same GPU process.
+//   Thousands of finish() = thousands of GPU-process stalls = jank.
 //
-// The GPU driver interleaves compositor and our tiles at the hardware level.
-// No process-level sync, no stalls, no jank.
+// gl.flush() + setTimeout(16) per tile:
+//   Never waits for GPU completion. Tiles queue up in GPU command buffer.
+//   2000 tiles accumulate → GPU is 100% busy for entire duration → compositor
+//   never gets a gap → UI freezes.
+//
+// This version uses fenceSync + getSyncParameter:
+//   1. Submit ONE tile via drawArrays
+//   2. gl.fenceSync() — place a fence marker in the GPU command stream
+//   3. gl.flush() — push commands to GPU, return immediately
+//   4. Poll gl.getSyncParameter() every 4ms (non-blocking! no GPU-process stall)
+//   5. Once fence signals (GPU finished this tile), wait COMPOSITOR_GAP_MS
+//      → GPU is genuinely IDLE during this gap → compositor can render
+//   6. Submit next tile
+//
+// Result: GPU queue never has more than 1 tile. Between tiles, GPU is idle.
+// getSyncParameter is a lightweight client-side check, not a GPU-process sync.
+
+// Wait for a fence to signal, non-blockingly, then resolve after a gap.
+function waitForFence(sync) {
+  return new Promise(resolve => {
+    function poll() {
+      const status = gl.getSyncParameter(sync, gl.SYNC_STATUS);
+      if (status === gl.SIGNALED) {
+        gl.deleteSync(sync);
+        // GPU is now idle. Give compositor a guaranteed window before next tile.
+        setTimeout(resolve, COMPOSITOR_GAP_MS);
+      } else {
+        setTimeout(poll, 4);
+      }
+    }
+    setTimeout(poll, 2);
+  });
+}
 
 async function renderFractalToFBO(offset) {
   const w = canvas.width, h = canvas.height;
@@ -468,17 +487,15 @@ async function renderFractalToFBO(offset) {
         return;
       }
 
-      const tw = Math.min(TILE_SIZE, w - x);
-      const th = Math.min(TILE_SIZE, h - y);
-
-      gl.scissor(x, y, tw, th);
+      gl.scissor(x, y, Math.min(TILE_SIZE, w - x), Math.min(TILE_SIZE, h - y));
       gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-      // Non-blocking submit: push to GPU command queue, don't wait
-      gl.flush();
+      // Fence: mark this tile's completion point in GPU command stream
+      const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+      gl.flush(); // push to GPU, return immediately (non-blocking)
 
-      // Yield for one full frame — compositor has ample GPU time
-      await new Promise(r => setTimeout(r, TILE_YIELD_MS));
+      // Wait for GPU to finish THIS tile, then idle gap for compositor
+      await waitForFence(sync);
     }
   }
 
@@ -486,10 +503,6 @@ async function renderFractalToFBO(offset) {
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
   if (gen !== renderGen) return;
-
-  // One gl.finish() here only: ensure ALL tiles are done before transition.
-  // This is a single sync at the very end, not per-tile.
-  gl.finish();
 
   if (!fboAValid) {
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fboB.fbo);
