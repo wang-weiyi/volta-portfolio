@@ -466,6 +466,13 @@ function renderFractalToFBO() {
       return;
     }
     gl.deleteSync(pendingSync);
+
+    // Force full GPU completion — readPixels blocks until fboB is truly done
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
+    const _px = new Uint8Array(4);
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, _px);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
     pendingSync = null;
 
     if (!fboAValid) {
