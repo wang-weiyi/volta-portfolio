@@ -496,16 +496,9 @@ self.addEventListener('message', (e) => {
   } else if (type === 'mouseenter') {
     if (!fboAValid) renderFractalToFBO([0, 0]);
 
-  } else if (type === 'mousemove') {
-    pendingOffset[0] = (e.data.nx - 0.5) * MOUSE_STRENGTH;
-    pendingOffset[1] = (e.data.ny - 0.5) * MOUSE_STRENGTH;
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-      renderFractalToFBO([pendingOffset[0], pendingOffset[1]]);
-    }, DEBOUNCE_MS);
-
-  } else if (type === 'mouseleave') {
-    clearTimeout(debounceTimer);
-    debounceTimer = null;
+  } else if (type === 'click') {
+    const ox = (e.data.nx - 0.5) * MOUSE_STRENGTH;
+    const oy = (e.data.ny - 0.5) * MOUSE_STRENGTH;
+    renderFractalToFBO([ox, oy]);
   }
 });

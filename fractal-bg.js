@@ -39,6 +39,9 @@ const FractalBG = (() => {
       worker = new Worker('fractal-worker.js');
       worker.postMessage({ type: 'init', canvas: offscreen, w, h }, [offscreen]);
 
+      // 初始渲染：页面加载后立即触发一次
+      worker.postMessage({ type: 'mouseenter' });
+
       // ── 窗口尺寸变化 ─────────────────────────────────────────
       window.addEventListener('resize', () => {
         const [nw, nh] = getDrawSize();
@@ -47,22 +50,16 @@ const FractalBG = (() => {
         worker.postMessage({ type: 'resize', w: nw, h: nh });
       });
 
-      // ── 鼠标事件：只算归一化坐标，发消息，不做任何 GL 操作 ──
-      canvas.addEventListener('mouseenter', () => {
-        worker.postMessage({ type: 'mouseenter' });
-      });
-
-      canvas.addEventListener('mousemove', (e) => {
+      // ── 全局点击事件：仅当点击位于背景 canvas 内时更新分形 ──
+      document.addEventListener('click', (e) => {
         const rect = canvas.getBoundingClientRect();
+        const x = e.clientX, y = e.clientY;
+        if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return;
         worker.postMessage({
-          type: 'mousemove',
-          nx: (e.clientX - rect.left) / rect.width,
-          ny: (e.clientY - rect.top)  / rect.height,
+          type: 'click',
+          nx: (x - rect.left) / rect.width,
+          ny: (y - rect.top)  / rect.height,
         });
-      });
-
-      canvas.addEventListener('mouseleave', () => {
-        worker.postMessage({ type: 'mouseleave' });
       });
 
       return true;
