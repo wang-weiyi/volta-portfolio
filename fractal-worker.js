@@ -287,21 +287,8 @@ const MOUSE_STRENGTH = 0.285;
 const DEBOUNCE_MS    = 350;
 const TRANSITION_MS  = 900;
 
-// 光照基准方向与滚轮参数
-const BASE_LIGHT_DIR  = [-0.69, -0.23, -0.2];
-const SCROLL_SPEED    = 0.0008; // 每像素滚动对应的旋转弧度
-
-// 当前渲染状态（由点击和滚轮共同驱动）
-let currentOffset  = [0, 0];
-let currentScrollY = 0;
-
-// 根据累计滚动量在 XZ 平面内旋转光照方向
-function calcLightDir(scrollY) {
-  const angle = scrollY * SCROLL_SPEED;
-  const cos = Math.cos(angle), sin = Math.sin(angle);
-  const x = BASE_LIGHT_DIR[0], z = BASE_LIGHT_DIR[2];
-  return [x * cos - z * sin, BASE_LIGHT_DIR[1], x * sin + z * cos];
-}
+// 当前渲染状态（由点击驱动）
+let currentOffset = [0, 0];
 
 
 // ── GL helpers ─────────────────────────────────────────────────────────────
@@ -361,7 +348,7 @@ function cacheFractalUniforms(g, p) {
   return out;
 }
 
-function setFractalUniforms(g, u, offset, rw, rh, lightDir) {
+function setFractalUniforms(g, u, offset, rw, rh) {
   g.uniform1f(u.u_time, 0.0);
   g.uniform2f(u.u_resolution, rw, rh);
   g.uniform3f(u.u_juliaC,           0.345, 0.557, 0.0);
@@ -378,7 +365,7 @@ function setFractalUniforms(g, u, offset, rw, rh, lightDir) {
   g.uniform1f(u.u_zOffset,          0.0);
   g.uniform1f(u.u_zOffset2,         0.0);
   g.uniform1f(u.u_proj,             1.0);
-  g.uniform3f(u.u_lightDir,         lightDir[0], lightDir[1], lightDir[2]);
+  g.uniform3f(u.u_lightDir,        -0.69, -0.23, -0.2);
   g.uniform3f(u.u_lightColor,       1.0,   1.0,   1.0);
   g.uniform3f(u.u_ambientColor,     0.3,   0.3,   0.3);
   g.uniform3f(u.u_materialColor,    0.9,   0.9,   0.9);
@@ -423,33 +410,6 @@ function startTransitionLoop() {
   transitionTimer = setTimeout(tick, 16);
 }
 
-// ── 滚动光照更新：直接覆写 fboA，无过渡动画 ──────────────────────────────
-// WebGL 同一上下文内命令有序执行，无需 setTimeout 等待 GPU 完成
-function renderScrollLighting() {
-  if (!fboAValid || !canvas || !gl) return;
-  const w = canvas.width, h = canvas.height;
-  if (!fboA || fboA.w !== w || fboA.h !== h) return;
-
-  // 若正在过渡中，中止过渡，直接以当前光照更新画面
-  if (isTransitioning) {
-    isTransitioning = false;
-    clearTimeout(transitionTimer);
-    transitionTimer = null;
-  }
-
-  const lightDir = calcLightDir(currentScrollY);
-
-  // 直接渲染进 fboA（当前展示缓冲），随即显示
-  gl.bindFramebuffer(gl.FRAMEBUFFER, fboA.fbo);
-  gl.viewport(0, 0, w, h);
-  gl.useProgram(fractalProg);
-  setFractalUniforms(gl, fractalUniforms, currentOffset, w, h, lightDir);
-  gl.drawArrays(gl.TRIANGLES, 0, 3);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  drawDisplay(0.0);
-  gl.flush();
-}
-
 function renderFractalToFBO() {
   const w = canvas.width, h = canvas.height;
   ++renderGen;
@@ -467,14 +427,12 @@ function renderFractalToFBO() {
     const tmp = fboA; fboA = fboB; fboB = tmp;
   }
 
-  const lightDir = calcLightDir(currentScrollY);
-
   // Single full-frame draw into fboB. GPU executes asynchronously.
   // flush() pushes commands without blocking worker or GPU process.
   gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
   gl.viewport(0, 0, w, h);
   gl.useProgram(fractalProg);
-  setFractalUniforms(gl, fractalUniforms, currentOffset, w, h, lightDir);
+  setFractalUniforms(gl, fractalUniforms, currentOffset, w, h);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.flush();
@@ -545,8 +503,5 @@ self.addEventListener('message', (e) => {
     currentOffset[1] = (e.data.ny - 0.5) * MOUSE_STRENGTH;
     renderFractalToFBO();
 
-  } else if (type === 'scroll') {
-    currentScrollY = e.data.scrollY;
-    renderScrollLighting();
   }
 });

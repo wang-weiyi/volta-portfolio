@@ -62,10 +62,6 @@ const FractalBG = (() => {
         });
       });
 
-      // ── 滚动事件：用页面实际位置驱动光照，同一位置光照恒定 ──
-      window.addEventListener('scroll', () => {
-        worker.postMessage({ type: 'scroll', scrollY: window.scrollY });
-      }, { passive: true });
 
       return true;
     },
