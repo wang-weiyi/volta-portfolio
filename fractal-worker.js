@@ -421,8 +421,18 @@ function startTransitionLoop() {
   transitionTimer = setTimeout(tick, 16);
 }
 
+let pendingSync = null;   // fence from in-progress render
+let pendingOffset = null; // queued click while GPU is busy
+
 function renderFractalToFBO() {
   const w = canvas.width, h = canvas.height;
+
+  // If GPU is still rendering, queue this request instead of overwriting fboB
+  if (pendingSync) {
+    pendingOffset = [...currentOffset];
+    return;
+  }
+
   ++renderGen;
 
   if (!fboA || fboA.w !== w || fboA.h !== h) {
@@ -438,31 +448,26 @@ function renderFractalToFBO() {
     const tmp = fboA; fboA = fboB; fboB = tmp;
   }
 
-  // Single full-frame draw into fboB. GPU executes asynchronously.
-  // flush() pushes commands without blocking worker or GPU process.
   gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
   gl.viewport(0, 0, w, h);
   gl.useProgram(fractalProg);
   setFractalUniforms(gl, fractalUniforms, currentOffset, w, h);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  gl.flush();
 
-  // Use fence sync to detect when GPU finishes rendering
-  const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+  pendingSync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
   gl.flush();
-  const myGen = renderGen;
 
   function pollFence() {
-    if (myGen !== renderGen) { gl.deleteSync(sync); return; }
-    const status = gl.clientWaitSync(sync, 0, 0);
-    if (status === gl.WAIT_FAILED) { gl.deleteSync(sync); return; }
-    if (status === gl.TIMEOUT_EXPIRED) {
+    // Use getSyncParameter (guaranteed non-blocking) instead of clientWaitSync
+    const signaled = gl.getSyncParameter(pendingSync, gl.SYNC_STATUS) === gl.SIGNALED;
+    if (!signaled) {
       setTimeout(pollFence, 50);
       return;
     }
-    // GPU done (ALREADY_SIGNALED or CONDITION_SATISFIED)
-    gl.deleteSync(sync);
+    gl.deleteSync(pendingSync);
+    pendingSync = null;
+
     if (!fboAValid) {
       gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fboB.fbo);
       gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, fboA.fbo);
@@ -474,12 +479,19 @@ function renderFractalToFBO() {
       drawDisplay(0.0);
       gl.flush();
       self.postMessage({ type: 'renderDone' });
-      return;
+    } else {
+      isTransitioning = true;
+      transitionStart = performance.now();
+      startTransitionLoop();
+      self.postMessage({ type: 'renderDone' });
     }
-    isTransitioning = true;
-    transitionStart = performance.now();
-    startTransitionLoop();
-    self.postMessage({ type: 'renderDone' });
+
+    // Process queued render if any
+    if (pendingOffset) {
+      currentOffset = pendingOffset;
+      pendingOffset = null;
+      renderFractalToFBO();
+    }
   }
   setTimeout(pollFence, 100);
 }
