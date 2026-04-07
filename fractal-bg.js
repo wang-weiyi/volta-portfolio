@@ -16,18 +16,27 @@ const FractalBG = (() => {
 
   // ── HUD helpers ───────────────────────────────────────────
   const hud = {
+    el:        null,
     coords:    null,
     xEl:       null,
     yEl:       null,
     hint:      null,
     computing: null,
 
-    init() {
+    init(canvas) {
+      this.el        = document.getElementById('fractalHUD');
       this.coords    = document.getElementById('fractalCoords');
       this.xEl       = document.getElementById('fractalX');
       this.yEl       = document.getElementById('fractalY');
       this.hint      = document.getElementById('fractalHint');
       this.computing = document.getElementById('fractalComputing');
+
+      // 当分形 canvas 离开视口时隐藏 HUD
+      if (this.el && typeof IntersectionObserver !== 'undefined') {
+        new IntersectionObserver(([entry]) => {
+          this.el.style.display = entry.isIntersecting ? '' : 'none';
+        }, { threshold: 0 }).observe(canvas);
+      }
     },
 
     showCoords(nx, ny) {
@@ -67,7 +76,7 @@ const FractalBG = (() => {
         return false;
       }
 
-      hud.init();
+      hud.init(canvas);
 
       // 把 canvas 控制权完整转移给 worker（主线程之后无法再操作其渲染上下文）
       const offscreen = canvas.transferControlToOffscreen();
