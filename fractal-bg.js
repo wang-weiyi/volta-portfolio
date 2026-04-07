@@ -105,15 +105,16 @@ const FractalBG = (() => {
         worker.postMessage({ type: 'resize', w: nw, h: nh });
       });
 
-      // ── 鼠标移动：更新坐标显示 ──────────────────────────────
-      canvas.addEventListener('mousemove', (e) => {
+      // ── 鼠标移动：在整个 hero 区域内都显示坐标（不被前景文字遮挡）
+      const heroSection = canvas.closest('.hero') || canvas.parentElement;
+      heroSection.addEventListener('mousemove', (e) => {
         const rect = canvas.getBoundingClientRect();
         const nx = (e.clientX - rect.left) / rect.width;
         const ny = (e.clientY - rect.top)  / rect.height;
         hud.showCoords(nx, ny);
       });
 
-      canvas.addEventListener('mouseleave', () => hud.hideCoords());
+      heroSection.addEventListener('mouseleave', () => hud.hideCoords());
 
       // ── 全局点击事件：仅当点击位于背景 canvas 内时更新分形 ──
       document.addEventListener('click', (e) => {
