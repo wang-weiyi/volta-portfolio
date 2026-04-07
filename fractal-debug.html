@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <title>Fractal Debug</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+      background: #111;
+      color: #ccc;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 12px;
+    }
+
+    #viewport {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      cursor: crosshair;
+    }
+    canvas.dragging { cursor: grabbing; }
+
+    #perf {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      background: rgba(0,0,0,0.65);
+      padding: 3px 8px;
+      color: #7af;
+      font-size: 11px;
+      pointer-events: none;
+      border: 1px solid #224;
+    }
+
+    #sidebar {
+      width: 270px;
+      min-width: 270px;
+      background: #161616;
+      border-left: 1px solid #2a2a2a;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #sidebar-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 6px 8px 12px;
+    }
+
+    #sidebar-scroll::-webkit-scrollbar { width: 6px; }
+    #sidebar-scroll::-webkit-scrollbar-track { background: #111; }
+    #sidebar-scroll::-webkit-scrollbar-thumb { background: #333; }
+
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 5px 2px;
+      margin-top: 8px;
+      cursor: pointer;
+      color: #999;
+      border-bottom: 1px solid #2a2a2a;
+      user-select: none;
+      letter-spacing: 0.05em;
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+    .section-header:first-child { margin-top: 0; }
+    .section-header:hover { color: #ddd; }
+
+    .section-body { padding-top: 4px; }
+    .section-body.collapsed { display: none; }
+
+    .param-row {
+      display: grid;
+      grid-template-columns: 88px 1fr 54px;
+      align-items: center;
+      gap: 4px;
+      margin-bottom: 3px;
+    }
+
+    .param-label {
+      color: #777;
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      height: 3px;
+      accent-color: #4a9eff;
+      cursor: pointer;
+    }
+
+    input[type="number"] {
+      width: 54px;
+      background: #1e1e1e;
+      border: 1px solid #333;
+      color: #ccc;
+      padding: 2px 4px;
+      font-size: 11px;
+      font-family: inherit;
+      text-align: right;
+    }
+    input[type="number"]:focus { outline: 1px solid #4a9eff; border-color: #4a9eff; }
+
+    .check-row {
+      display: grid;
+      grid-template-columns: 88px auto;
+      align-items: center;
+      gap: 4px;
+      margin-bottom: 3px;
+    }
+    input[type="checkbox"] { accent-color: #4a9eff; cursor: pointer; }
+
+    .color-row {
+      display: grid;
+      grid-template-columns: 88px 28px 1fr;
+      align-items: center;
+      gap: 4px;
+      margin-bottom: 3px;
+    }
+    input[type="color"] {
+      width: 28px;
+      height: 18px;
+      padding: 1px;
+      border: 1px solid #333;
+      background: #1e1e1e;
+      cursor: pointer;
+    }
+    .color-hex { color: #666; font-size: 10px; }
+
+    #sidebar-footer {
+      padding: 8px;
+      border-top: 1px solid #2a2a2a;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    button.action-btn {
+      width: 100%;
+      padding: 5px;
+      background: #1e2a38;
+      border: 1px solid #2a4a6a;
+      color: #6af;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 11px;
+      letter-spacing: 0.03em;
+    }
+    button.action-btn:hover { background: #243040; }
+    button.action-btn:active { background: #121e2a; }
+    button.reset-btn {
+      background: #2a1e1e;
+      border-color: #5a2a2a;
+      color: #f88;
+    }
+    button.reset-btn:hover { background: #3a2020; }
+  </style>
+</head>
+<body>
+
+<div id="viewport">
+  <canvas id="fractalCanvas"></canvas>
+  <div id="perf">-- fps</div>
+</div>
+
+<div id="sidebar">
+  <div id="sidebar-scroll"></div>
+  <div id="sidebar-footer">
+    <button class="action-btn" id="copyBtn">Copy params as JSON</button>
+    <button class="action-btn reset-btn" id="resetBtn">Reset to defaults</button>
+  </div>
+</div>
+
+<script>
+// ── Shader Sources ─────────────────────────────────────────────────────────
+
+const VERT_SRC = `#version 300 es
+precision highp float;
+out vec2 vUv;
+void main(){
+  vec2 pos[3] = vec2[](vec2(-1,-1),vec2(3,-1),vec2(-1,3));
+  gl_Position = vec4(pos[gl_VertexID], 0.0, 1.0);
+  vUv = (pos[gl_VertexID] + 1.0) * 0.5;
+}`;
+
+const FRAG_SRC = `#version 300 es
+precision highp float;
+
+in vec2 vUv;
+out vec4 fragColor;
+
+uniform float u_time;
+uniform vec2  u_resolution;
+
+// 分形参数
+uniform vec3  u_juliaC;
+uniform vec2  u_juliaCOffset;   // 鼠标位移，叠加到 juliaC.xy
+uniform vec3  u_rotAxis;
+uniform float u_rotAngle;
+uniform float u_scale;
+uniform float u_bailout;
+uniform int   u_iter;
+uniform int   u_inversion;
+uniform int   u_rotateC;
+uniform float u_uvScale;
+uniform float u_zPower;
+uniform float u_zOffset;
+uniform float u_zOffset2;
+uniform float u_proj;
+
+// 光照参数
+uniform vec3  u_lightDir;
+uniform vec3  u_lightColor;
+uniform vec3  u_ambientColor;
+uniform vec3  u_materialColor;
+uniform float u_shininess;
+uniform float u_ambientStrength;
+uniform float u_specularStrength;
+
+// 相机
+uniform vec3  u_camPos;
+uniform vec3  u_camTarget;
+uniform float u_fov;
+
+// 渲染质量
+uniform int   u_rmSteps;
+
+// ── 旋转矩阵（Rodrigues）────────────────────────────────────────
+mat3 rotAxisAngle(float angle, vec3 axis) {
+  axis = normalize(axis);
+  float c = cos(angle), s = sin(angle), t = 1.0 - c;
+  float x = axis.x, y = axis.y, z = axis.z;
+  return mat3(
+    t*x*x+c,   t*x*y-s*z, t*x*z+s*y,
+    t*y*x+s*z, t*y*y+c,   t*y*z-s*x,
+    t*z*x-s*y, t*z*y+s*x, t*z*z+c
+  );
+}
+
+// Frobenius 范数
+float frobeniusNorm(mat3 M) {
+  return sqrt(dot(M[0],M[0]) + dot(M[1],M[1]) + dot(M[2],M[2]));
+}
+
+// ── 等距柱状投影逆变换 ──────────────────────────────────────────
+vec3 equirectangularInverse(vec3 planarPos, float scale, float radius) {
+  float useR = (radius != 0.0) ? radius : planarPos.z;
+  float lon = planarPos.x / scale;
+  float lat = planarPos.y / scale;
+  float xzLen = useR * cos(lat);
+  return vec3(xzLen * sin(lon), useR * sin(lat), xzLen * cos(lon));
+}
+
+// ── 位置变换 T(pos) = pos + proj*(F(pos)-pos) ──────────────────
+vec3 applyTransform(vec3 pos) {
+  float r = sign(pos.z) * pow(abs(pos.z), u_zPower);
+  r += sign(pos.z) * u_zOffset;
+  r += u_zOffset2;
+  vec3 npos = equirectangularInverse(pos, u_uvScale, r);
+  return pos + u_proj * (npos - pos);
+}
+
+// ── 解析雅可比矩阵 J_T = I + proj*(J_F - I) ────────────────────
+mat3 computeTransformJacobian(vec3 pos) {
+  float absZ = abs(pos.z);
+  float signZ = sign(pos.z);
+
+  float r = (absZ > 1e-6 ? signZ * pow(absZ, u_zPower) : 0.0)
+            + signZ * u_zOffset + u_zOffset2;
+  float useR, dr_dz;
+  if (r != 0.0) {
+    useR  = r;
+    dr_dz = (absZ > 1e-6) ? u_zPower * pow(absZ, u_zPower - 1.0) : 0.0;
+  } else {
+    useR  = pos.z;
+    dr_dz = 1.0;
+  }
+
+  float lon    = pos.x / u_uvScale;
+  float lat    = pos.y / u_uvScale;
+  float cosLat = cos(lat), sinLat = sin(lat);
+  float cosLon = cos(lon), sinLon = sin(lon);
+  float invS   = 1.0 / u_uvScale;
+
+  // GLSL mat3 列主序：mat3(col0, col1, col2)
+  mat3 JF = mat3(
+    vec3( useR * cosLat * cosLon * invS,   0.0,  -useR * cosLat * sinLon * invS),
+    vec3(-useR * sinLat * sinLon * invS,   useR * cosLat * invS,  -useR * sinLat * cosLon * invS),
+    vec3( cosLat * sinLon * dr_dz,         sinLat * dr_dz,         cosLat * cosLon * dr_dz)
+  );
+
+  return mat3(1.0) + u_proj * (JF - mat3(1.0));
+}
+
+// ── SDF ────────────────────────────────────────────────────────
+float sdf(vec3 pos) {
+  vec3 tp = applyTransform(pos);
+  mat3 Jt = computeTransformJacobian(pos);
+
+  vec3 z;
+  mat3 D;
+
+  if (u_inversion == 1) {
+    float r2 = dot(tp, tp);
+    z = tp / r2;
+    mat3 outer = outerProduct(tp, tp);
+    mat3 Jinv = (mat3(1.0) - 2.0/r2 * outer) / r2;
+    D = Jinv * Jt;
+  } else {
+    z = tp;
+    D = Jt;
+  }
+
+  mat3 rot = rotAxisAngle(u_rotAngle, u_rotAxis);
+  vec3 j = u_juliaC + vec3(u_juliaCOffset, 0.0);
+
+  for (int i = 0; i < 64; i++) {
+    if (i >= u_iter) break;
+
+    float a = z.x, b = z.y;
+    vec3 zn = vec3(a*a - b*b, 2.0*a*b, z.z);
+
+    // Julia 迭代的雅可比（列主序）
+    mat3 Jj = mat3(
+       2.0*a,  2.0*b, 0.0,
+      -2.0*b,  2.0*a, 0.0,
+       0.0,    0.0,   1.0
+    );
+
+    D = rot * Jj * D;
+    z = rot * zn;
+    if (u_rotateC == 1) j = rot * j;
+    z = z * u_scale + j;
+
+    float r = length(z);
+    if (r > u_bailout) {
+      float normD = frobeniusNorm(D);
+      float distScale = clamp(float(i+1) / 50.0, 0.0, 1.0);
+      float de = (0.5 + 0.25*distScale) * r * log(r) / normD;
+      return max(de, length(pos) - 30.0);
+    }
+  }
+  return 0.0;
+}
+
+// ── 法向量 ─────────────────────────────────────────────────────
+vec3 calcNormal(vec3 p) {
+  float eps = 0.0005;
+  float d = sdf(p);
+  return normalize(vec3(
+    sdf(p + vec3(eps,0,0)) - d,
+    sdf(p + vec3(0,eps,0)) - d,
+    sdf(p + vec3(0,0,eps)) - d
+  ));
+}
+
+// ── AO ─────────────────────────────────────────────────────────
+float calcAO(vec3 p, vec3 n) {
+  float dist = 0.002, occ = 1.0;
+  for (int i = 0; i < 8; i++) {
+    occ = min(occ, sdf(p + dist*n) / dist);
+    dist *= 2.0;
+  }
+  return max(occ, 0.0);
+}
+
+// ── 软阴影 ─────────────────────────────────────────────────────
+float softShadow(vec3 ro, vec3 rd, float mint, float maxt, float w) {
+  float res = 1.0, ph = 1e20, t = mint;
+  for (int i = 0; i < 64 && t < maxt; i++) {
+    float h = sdf(ro + rd*t);
+    if (h < 0.001) return 0.0;
+    float y = h*h / (2.0*ph);
+    float d = sqrt(h*h - y*y);
+    res = min(res, clamp(d / (w * max(0.01, t-y)), 0.0, 10.0));
+    ph = h; t += h;
+  }
+  return res;
+}
+
+// ── Phong 光照 ─────────────────────────────────────────────────
+vec3 phongLighting(vec3 p, vec3 normal, vec3 viewDir) {
+  vec3 ld      = normalize(-u_lightDir);
+  vec3 ambient = u_ambientStrength * u_ambientColor;
+  float diff   = max(dot(normal, ld), 0.0);
+  vec3 reflDir = reflect(ld, normal);
+  float spec   = pow(max(dot(viewDir, reflDir), 0.0), u_shininess);
+  return (ambient + diff * u_lightColor + u_specularStrength * spec * u_lightColor) * u_materialColor;
+}
+
+// ── ACES 色调映射 ───────────────────────────────────────────────
+vec3 aces(vec3 x) {
+  float a=2.51, b=0.03, c=2.43, d=0.59, e=0.14;
+  return clamp((x*(a*x+b))/(x*(c*x+d)+e), 0.0, 1.0);
+}
+
+// ── 主函数 ─────────────────────────────────────────────────────
+void main() {
+  vec2 uv = vUv;
+
+  vec3 ro  = u_camPos;
+  vec3 fwd = normalize(u_camTarget - ro);
+  vec3 worldUp = abs(fwd.y) < 0.99 ? vec3(0,1,0) : vec3(0,0,1);
+  vec3 right = normalize(cross(worldUp, fwd));
+  vec3 up    = cross(fwd, right);
+
+  float aspect    = u_resolution.x / u_resolution.y;
+  vec2 ndc        = (uv - 0.5) * 2.0;
+  ndc.x          *= aspect;
+  float fovFactor = tan(u_fov * 0.5);
+  vec3 rd = normalize(fwd + ndc.x * fovFactor * right + ndc.y * fovFactor * up);
+
+  // Raymarching
+  vec3 raypos = ro;
+  bool hit = false;
+  for (int i = 0; i < 512; i++) {
+    if (i >= u_rmSteps) break;
+    float dist = sdf(raypos);
+    if (dist < 0.0001) { hit = true; break; }
+    if (length(raypos - ro) > 60.0) break;
+    raypos += dist * rd;
+  }
+
+  vec3 col;
+  if (hit) {
+    vec3  normal  = calcNormal(raypos);
+    float ao      = calcAO(raypos, normal);
+    vec3  viewDir = normalize(ro - raypos);
+    vec3  ldir    = normalize(u_lightDir);
+    float shadow  = softShadow(raypos + 0.0001*normal, -ldir, 0.06, 5.0, 0.08);
+
+    col  = phongLighting(raypos, normal, viewDir);
+    col *= ao * (0.4 + 0.6 * shadow);
+  } else {
+    float t = smoothstep(0.0, 1.0, uv.y);
+    col = mix(vec3(0.02, 0.02, 0.04), vec3(0.04, 0.04, 0.08), t);
+  }
+
+  col  = aces(col * 1.2);
+  col  = pow(col, vec3(1.0/2.2));
+  col *= 1.0 - 0.4 * pow(length(uv*2.0-1.0), 2.0);  // vignette
+
+  fragColor = vec4(col, 1.0);
+}`;
+
+// ── Default Parameters ─────────────────────────────────────────────────────
+
+const DEFAULTS = {
+  // Fractal
+  juliaCx: 0.345, juliaCy: 0.557, juliaCz: 0.0,
+  rotAxisX: 1.0,  rotAxisY: 0.0,  rotAxisZ: 0.0,
+  rotAngle: 45.0,    // degrees in UI
+  scale: 0.957,
+  bailout: 3000.0,
+  iter: 24,
+  inversion: 0,
+  rotateC: 0,
+  uvScale: 2.5,
+  zPower: 1.0,
+  zOffset: 0.0,
+  zOffset2: 0.0,
+  proj: 1.0,
+  // Lighting
+  lightDirX: -0.69, lightDirY: -0.23, lightDirZ: -0.2,
+  lightR: 1.0,      lightG: 1.0,      lightB: 1.0,
+  ambientR: 0.3,    ambientG: 0.3,    ambientB: 0.3,
+  materialR: 0.9,   materialG: 0.9,   materialB: 0.9,
+  shininess: 93.0,
+  ambientStrength: 0.39,
+  specularStrength: 2.76,
+  // Camera (spherical coords around target)
+  camTheta:   -22.5,
+  camPhi:      18.4,
+  camRadius:   4.74,
+  camTargetX:  7.9, camTargetY: 0.0, camTargetZ: 1.55,
+  fov: 60.0,
+  // Render
+  renderScale: 1.05,
+  rmSteps: 389,
+  mouseStrength: 0.285,
+};
+
+// Working copy
+const P = Object.assign({}, DEFAULTS);
+
+// ── WebGL ──────────────────────────────────────────────────────────────────
+
+const canvas  = document.getElementById('fractalCanvas');
+let gl, prog, uniforms;
+let mouseOffset = [0, 0];
+let rafPending = false;
+let frameCount = 0, lastFPSTime = performance.now();
+
+function compileShader(gl, type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    console.error('Shader compile error:\n' + gl.getShaderInfoLog(s));
+    return null;
+  }
+  return s;
+}
+
+function buildProgram(gl) {
+  const vs = compileShader(gl, gl.VERTEX_SHADER,   VERT_SRC);
+  const fs = compileShader(gl, gl.FRAGMENT_SHADER, FRAG_SRC);
+  if (!vs || !fs) return null;
+  const p = gl.createProgram();
+  gl.attachShader(p, vs); gl.attachShader(p, fs);
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+    console.error('Link error:\n' + gl.getProgramInfoLog(p));
+    return null;
+  }
+  return p;
+}
+
+function cacheUniforms(gl, prog) {
+  const names = [
+    'u_time', 'u_resolution',
+    'u_juliaC', 'u_juliaCOffset', 'u_rotAxis', 'u_rotAngle',
+    'u_scale', 'u_bailout', 'u_iter', 'u_inversion', 'u_rotateC',
+    'u_uvScale', 'u_zPower', 'u_zOffset', 'u_zOffset2', 'u_proj',
+    'u_lightDir', 'u_lightColor', 'u_ambientColor', 'u_materialColor',
+    'u_shininess', 'u_ambientStrength', 'u_specularStrength',
+    'u_camPos', 'u_camTarget', 'u_fov', 'u_rmSteps',
+  ];
+  const out = {};
+  for (const n of names) out[n] = gl.getUniformLocation(prog, n);
+  return out;
+}
+
+function setUniforms(gl, u, t) {
+  gl.uniform1f(u.u_time, t);
+  gl.uniform2f(u.u_resolution, gl.drawingBufferWidth, gl.drawingBufferHeight);
+
+  gl.uniform3f(u.u_juliaC,      P.juliaCx,  P.juliaCy,  P.juliaCz);
+  gl.uniform2f(u.u_juliaCOffset, mouseOffset[0], mouseOffset[1]);
+  gl.uniform3f(u.u_rotAxis,     P.rotAxisX, P.rotAxisY, P.rotAxisZ);
+  gl.uniform1f(u.u_rotAngle,    P.rotAngle * Math.PI / 180.0);
+  gl.uniform1f(u.u_scale,       P.scale);
+  gl.uniform1f(u.u_bailout,     P.bailout);
+  gl.uniform1i(u.u_iter,        P.iter);
+  gl.uniform1i(u.u_inversion,   P.inversion);
+  gl.uniform1i(u.u_rotateC,     P.rotateC);
+  gl.uniform1f(u.u_uvScale,     P.uvScale);
+  gl.uniform1f(u.u_zPower,      P.zPower);
+  gl.uniform1f(u.u_zOffset,     P.zOffset);
+  gl.uniform1f(u.u_zOffset2,    P.zOffset2);
+  gl.uniform1f(u.u_proj,        P.proj);
+
+  gl.uniform3f(u.u_lightDir,         P.lightDirX,  P.lightDirY,  P.lightDirZ);
+  gl.uniform3f(u.u_lightColor,       P.lightR,     P.lightG,     P.lightB);
+  gl.uniform3f(u.u_ambientColor,     P.ambientR,   P.ambientG,   P.ambientB);
+  gl.uniform3f(u.u_materialColor,    P.materialR,  P.materialG,  P.materialB);
+  gl.uniform1f(u.u_shininess,        P.shininess);
+  gl.uniform1f(u.u_ambientStrength,  P.ambientStrength);
+  gl.uniform1f(u.u_specularStrength, P.specularStrength);
+
+  // 球坐标 → 笛卡尔相机位置
+  const _phi   = P.camPhi   * Math.PI / 180.0;
+  const _theta = P.camTheta * Math.PI / 180.0;
+  const _cx = P.camTargetX + P.camRadius * Math.cos(_phi) * Math.sin(_theta);
+  const _cy = P.camTargetY + P.camRadius * Math.sin(_phi);
+  const _cz = P.camTargetZ + P.camRadius * Math.cos(_phi) * Math.cos(_theta);
+  gl.uniform3f(u.u_camPos,    _cx, _cy, _cz);
+  gl.uniform3f(u.u_camTarget, P.camTargetX, P.camTargetY, P.camTargetZ);
+  gl.uniform1f(u.u_fov,       P.fov * Math.PI / 180.0);
+  gl.uniform1i(u.u_rmSteps, P.rmSteps);
+}
+
+function resize() {
+  const vp  = document.getElementById('viewport');
+  const dpr = Math.min(window.devicePixelRatio, 2.0) * P.renderScale;
+  canvas.width  = Math.floor(vp.clientWidth  * dpr);
+  canvas.height = Math.floor(vp.clientHeight * dpr);
+  if (gl) gl.viewport(0, 0, canvas.width, canvas.height);
+}
+
+function scheduleRender() {
+  if (!rafPending) {
+    rafPending = true;
+    requestAnimationFrame(renderFrame);
+  }
+}
+
+function renderFrame(ts) {
+  rafPending = false;
+  if (!gl || !prog) return;
+  gl.useProgram(prog);
+  setUniforms(gl, uniforms, ts / 1000.0);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  frameCount++;
+  const now = performance.now();
+  if (now - lastFPSTime > 600) {
+    const fps = (frameCount / (now - lastFPSTime) * 1000).toFixed(1);
+    document.getElementById('perf').textContent =
+      `${fps} fps  |  ${canvas.width} × ${canvas.height}`;
+    frameCount = 0;
+    lastFPSTime = now;
+  }
+}
+
+function initGL() {
+  gl = canvas.getContext('webgl2', { antialias: false, alpha: false });
+  if (!gl) { alert('WebGL2 not supported'); return false; }
+  prog = buildProgram(gl);
+  if (!prog) return false;
+  uniforms = cacheUniforms(gl, prog);
+  resize();
+  scheduleRender();
+  return true;
+}
+
+window.addEventListener('resize', () => { resize(); scheduleRender(); });
+
+// ── Mouse Interaction ──────────────────────────────────────────────────────
+// 左键拖拽：环绕轨道（theta / phi）
+// 滚轮：缩放（radius）
+// 悬停（无拖拽）：juliaC 微位移
+
+const sliderMap = {};  // key → { slider, num } — 由 addSlider 填充
+
+let isDragging = false;
+let lastDragX = 0, lastDragY = 0;
+
+canvas.addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return;
+  isDragging = true;
+  lastDragX = e.clientX;
+  lastDragY = e.clientY;
+  canvas.classList.add('dragging');
+  e.preventDefault();
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  if (isDragging) {
+    const dx = e.clientX - lastDragX;
+    const dy = e.clientY - lastDragY;
+    lastDragX = e.clientX;
+    lastDragY = e.clientY;
+
+    P.camTheta -= dx * 0.35;
+    P.camPhi    = Math.max(-89, Math.min(89, P.camPhi + dy * 0.25));
+
+    // 同步滑条显示
+    if (sliderMap.camTheta) {
+      sliderMap.camTheta.slider.value = P.camTheta;
+      sliderMap.camTheta.num.value    = P.camTheta.toFixed(1);
+    }
+    if (sliderMap.camPhi) {
+      sliderMap.camPhi.slider.value = P.camPhi;
+      sliderMap.camPhi.num.value    = P.camPhi.toFixed(1);
+    }
+    scheduleRender();
+  } else {
+    const rect = canvas.getBoundingClientRect();
+    mouseOffset[0] = ((e.clientX - rect.left)  / rect.width  - 0.5) * P.mouseStrength;
+    mouseOffset[1] = ((e.clientY - rect.top)   / rect.height - 0.5) * P.mouseStrength;
+    scheduleRender();
+  }
+});
+
+canvas.addEventListener('mouseup',   () => { isDragging = false; canvas.classList.remove('dragging'); });
+canvas.addEventListener('mouseleave',() => {
+  isDragging = false;
+  canvas.classList.remove('dragging');
+  mouseOffset[0] = 0; mouseOffset[1] = 0;
+  scheduleRender();
+});
+
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  P.camRadius *= Math.exp(e.deltaY * 0.001);
+  P.camRadius  = Math.max(0.3, Math.min(30.0, P.camRadius));
+  if (sliderMap.camRadius) {
+    sliderMap.camRadius.slider.value = P.camRadius;
+    sliderMap.camRadius.num.value    = P.camRadius.toFixed(2);
+  }
+  scheduleRender();
+}, { passive: false });
+
+// ── UI Builder ─────────────────────────────────────────────────────────────
+
+const scrollEl = document.getElementById('sidebar-scroll');
+
+// Color utilities
+function rgbToHex(r, g, b) {
+  return '#' + [r, g, b].map(v => Math.round(v * 255).toString(16).padStart(2,'0')).join('');
+}
+function hexToRgb(hex) {
+  return [1,3,5].map(i => parseInt(hex.slice(i, i+2), 16) / 255);
+}
+
+// Section with collapse toggle
+function addSection(title, open = true) {
+  const header = document.createElement('div');
+  header.className = 'section-header';
+  header.innerHTML = `<span>${title}</span><span class="arrow">${open ? '▼' : '▶'}</span>`;
+
+  const body = document.createElement('div');
+  body.className = 'section-body' + (open ? '' : ' collapsed');
+
+  header.addEventListener('click', () => {
+    const c = body.classList.toggle('collapsed');
+    header.querySelector('.arrow').textContent = c ? '▶' : '▼';
+  });
+
+  scrollEl.appendChild(header);
+  scrollEl.appendChild(body);
+  return body;
+}
+
+// Slider + number input pair
+function addSlider(container, label, key, min, max, step, onExtra) {
+  const row = document.createElement('div');
+  row.className = 'param-row';
+
+  const lbl = document.createElement('span');
+  lbl.className = 'param-label';
+  lbl.textContent = label;
+  lbl.title = label;
+
+  const slider = document.createElement('input');
+  slider.type = 'range';
+  slider.min = min; slider.max = max; slider.step = step;
+  slider.value = P[key];
+
+  const num = document.createElement('input');
+  num.type = 'number';
+  num.min = min; num.max = max; num.step = step;
+  num.value = P[key];
+
+  const update = (v) => {
+    P[key] = v;
+    if (onExtra) onExtra();
+    scheduleRender();
+  };
+
+  slider.addEventListener('input', () => {
+    const v = parseFloat(slider.value);
+    num.value = v;
+    update(v);
+  });
+  num.addEventListener('change', () => {
+    const v = parseFloat(num.value);
+    slider.value = v;
+    update(v);
+  });
+
+  row.appendChild(lbl); row.appendChild(slider); row.appendChild(num);
+  container.appendChild(row);
+
+  // Register for programmatic sync (drag / scroll)
+  sliderMap[key] = { slider, num };
+
+  return { slider, num, key };
+}
+
+// Checkbox
+function addCheckbox(container, label, key) {
+  const row = document.createElement('div');
+  row.className = 'check-row';
+
+  const lbl = document.createElement('span');
+  lbl.className = 'param-label';
+  lbl.textContent = label;
+
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.checked = P[key] === 1;
+  cb.addEventListener('change', () => { P[key] = cb.checked ? 1 : 0; scheduleRender(); });
+
+  row.appendChild(lbl); row.appendChild(cb);
+  container.appendChild(row);
+  return { cb, key };
+}
+
+// Color picker
+function addColorPicker(container, label, rKey, gKey, bKey) {
+  const row = document.createElement('div');
+  row.className = 'color-row';
+
+  const lbl = document.createElement('span');
+  lbl.className = 'param-label';
+  lbl.textContent = label; lbl.title = label;
+
+  const cp = document.createElement('input');
+  cp.type = 'color';
+  cp.value = rgbToHex(P[rKey], P[gKey], P[bKey]);
+
+  const hexSpan = document.createElement('span');
+  hexSpan.className = 'color-hex';
+  hexSpan.textContent = cp.value;
+
+  cp.addEventListener('input', () => {
+    const [r, g, b] = hexToRgb(cp.value);
+    P[rKey] = r; P[gKey] = g; P[bKey] = b;
+    hexSpan.textContent = cp.value;
+    scheduleRender();
+  });
+
+  row.appendChild(lbl); row.appendChild(cp); row.appendChild(hexSpan);
+  container.appendChild(row);
+  return { cp, hexSpan, rKey, gKey, bKey };
+}
+
+// ── Build Sections ─────────────────────────────────────────────────────────
+
+const allControls = [];  // for reset
+
+const fractalSec = addSection('Fractal', true);
+allControls.push(
+  addSlider(fractalSec, 'juliaC.x',   'juliaCx',  -2.0,  2.0,  0.001),
+  addSlider(fractalSec, 'juliaC.y',   'juliaCy',  -2.0,  2.0,  0.001),
+  addSlider(fractalSec, 'juliaC.z',   'juliaCz',  -2.0,  2.0,  0.001),
+  addSlider(fractalSec, 'rotAxis.x',  'rotAxisX', -1.0,  1.0,  0.01),
+  addSlider(fractalSec, 'rotAxis.y',  'rotAxisY', -1.0,  1.0,  0.01),
+  addSlider(fractalSec, 'rotAxis.z',  'rotAxisZ', -1.0,  1.0,  0.01),
+  addSlider(fractalSec, 'rotAngle °', 'rotAngle', -180,  180,  0.5),
+  addSlider(fractalSec, 'scale',      'scale',    0.01,  2.0,  0.001),
+  addSlider(fractalSec, 'bailout',    'bailout',  10,    10000, 10),
+  addSlider(fractalSec, 'iter',       'iter',     1,     64,   1),
+  addCheckbox(fractalSec, 'inversion', 'inversion'),
+  addCheckbox(fractalSec, 'rotateC',   'rotateC'),
+  addSlider(fractalSec, 'uvScale',    'uvScale',  0.1,  10.0,  0.01),
+  addSlider(fractalSec, 'zPower',     'zPower',   0.1,   4.0,  0.01),
+  addSlider(fractalSec, 'zOffset',    'zOffset',  -5.0,  5.0,  0.01),
+  addSlider(fractalSec, 'zOffset2',   'zOffset2', -5.0,  5.0,  0.01),
+  addSlider(fractalSec, 'proj',       'proj',     0.0,   2.0,  0.01),
+);
+
+const lightSec = addSection('Lighting', true);
+allControls.push(
+  addSlider(lightSec, 'lightDir.x',  'lightDirX', -1.0, 1.0, 0.01),
+  addSlider(lightSec, 'lightDir.y',  'lightDirY', -1.0, 1.0, 0.01),
+  addSlider(lightSec, 'lightDir.z',  'lightDirZ', -1.0, 1.0, 0.01),
+  addColorPicker(lightSec, 'lightColor',    'lightR',    'lightG',    'lightB'),
+  addColorPicker(lightSec, 'ambientColor',  'ambientR',  'ambientG',  'ambientB'),
+  addColorPicker(lightSec, 'materialColor', 'materialR', 'materialG', 'materialB'),
+  addSlider(lightSec, 'shininess',   'shininess',         1.0, 200.0, 0.5),
+  addSlider(lightSec, 'ambient',     'ambientStrength',   0.0,   1.0, 0.01),
+  addSlider(lightSec, 'specular',    'specularStrength',  0.0,   5.0, 0.01),
+);
+
+const camSec = addSection('Camera  [drag=orbit  scroll=zoom]', true);
+allControls.push(
+  addSlider(camSec, 'theta °',   'camTheta',   -180,   180,  0.5),
+  addSlider(camSec, 'phi °',     'camPhi',      -89,    89,  0.5),
+  addSlider(camSec, 'radius',    'camRadius',   0.3,    30,  0.05),
+  addSlider(camSec, 'target.x',  'camTargetX', -10.0, 10.0, 0.05),
+  addSlider(camSec, 'target.y',  'camTargetY', -10.0, 10.0, 0.05),
+  addSlider(camSec, 'target.z',  'camTargetZ', -10.0, 10.0, 0.05),
+  addSlider(camSec, 'fov °',     'fov',          10,   120,  0.5),
+);
+
+const renderSec = addSection('Render', true);
+allControls.push(
+  addSlider(renderSec, 'resolution',    'renderScale',   0.1, 1.5, 0.05, () => resize()),
+  addSlider(renderSec, 'rm steps',      'rmSteps',       10,  512,  1),
+  addSlider(renderSec, 'mouseStrength', 'mouseStrength', 0.0, 0.5,  0.005),
+);
+
+// ── Footer Buttons ─────────────────────────────────────────────────────────
+
+document.getElementById('copyBtn').addEventListener('click', () => {
+  const btn = document.getElementById('copyBtn');
+  const phi   = P.camPhi   * Math.PI / 180;
+  const theta = P.camTheta * Math.PI / 180;
+  const out = Object.assign({}, P);
+  // Add computed cartesian camPos for easy copy into fractal-bg.js
+  out._camPosX = +(P.camTargetX + P.camRadius * Math.cos(phi) * Math.sin(theta)).toFixed(4);
+  out._camPosY = +(P.camTargetY + P.camRadius * Math.sin(phi)).toFixed(4);
+  out._camPosZ = +(P.camTargetZ + P.camRadius * Math.cos(phi) * Math.cos(theta)).toFixed(4);
+  navigator.clipboard.writeText(JSON.stringify(out, null, 2)).then(() => {
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = 'Copy params as JSON'; }, 1500);
+  });
+});
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+  Object.assign(P, DEFAULTS);
+  mouseOffset[0] = 0; mouseOffset[1] = 0;
+
+  // Refresh all slider/number inputs
+  for (const ctrl of allControls) {
+    if (!ctrl) continue;
+    if ('slider' in ctrl) {
+      ctrl.slider.value = P[ctrl.key];
+      ctrl.num.value    = P[ctrl.key];
+    } else if ('cb' in ctrl) {
+      ctrl.cb.checked = P[ctrl.key] === 1;
+    } else if ('cp' in ctrl) {
+      ctrl.cp.value = rgbToHex(P[ctrl.rKey], P[ctrl.gKey], P[ctrl.bKey]);
+      ctrl.hexSpan.textContent = ctrl.cp.value;
+    }
+  }
+
+  resize();
+  scheduleRender();
+});
+
+// ── Start ──────────────────────────────────────────────────────────────────
+
+initGL();
+</script>
+</body>
+</html>

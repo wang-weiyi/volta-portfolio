@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>文章 · VOLTA</title>
+<link rel="stylesheet" href="style.css">
+<style>
+body{padding-top:60px}
+.art-header{max-width:760px;margin:0 auto;padding:3rem 2rem 2rem}
+.art-header-meta{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:1.5rem;font-size:12px;color:var(--muted)}
+.art-header-title{font-family:var(--fh);font-size:clamp(2rem,5vw,3.5rem);font-weight:800;letter-spacing:-2px;line-height:1.05;margin-bottom:1rem}
+.art-header-cover{max-width:1000px;margin:0 auto 0;padding:0 2rem}
+.art-header-cover img{width:100%;height:auto;border-radius:var(--rl);display:block;max-height:500px;object-fit:cover}
+.art-content{max-width:760px;margin:2.5rem auto 5rem;padding:0 2rem}
+
+/* Editor mode */
+.editor-bar{position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%);background:var(--bg2);border:1px solid var(--line2);border-radius:var(--rl);padding:.6rem 1rem;display:flex;align-items:center;gap:8px;z-index:100;box-shadow:0 8px 32px rgba(0,0,0,.5);white-space:nowrap}
+.editor-bar-label{font-size:12px;color:var(--muted)}
+.title-input{font-family:var(--fh);font-size:clamp(2rem,5vw,3.5rem);font-weight:800;letter-spacing:-2px;line-height:1.05;background:transparent;border:none;outline:none;color:var(--text);width:100%;border-bottom:1px solid var(--line);padding-bottom:.5rem;margin-bottom:1rem}
+.title-input:focus{border-bottom-color:var(--acc)}
+/* Tags edit */
+.tags-edit{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+/* Cover upload in editor */
+.cover-upload{border:1px dashed var(--line2);border-radius:var(--rl);padding:1.5rem;text-align:center;cursor:pointer;transition:all .18s;color:var(--muted);font-size:13px;margin-bottom:1rem}
+.cover-upload:hover{border-color:rgba(200,255,0,.4);background:rgba(200,255,0,.02)}
+</style>
+</head>
+<body>
+<nav class="nav">
+  <a href="articles.html" class="nav-back">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+    文章列表
+  </a>
+  <div style="display:flex;align-items:center;gap:8px" id="navRight">
+    <!-- populated by JS -->
+  </div>
+</nav>
+
+<div id="pageContent" style="min-height:60vh">
+  <div style="display:flex;align-items:center;justify-content:center;min-height:50vh;color:var(--muted);font-size:14px">加载中…</div>
+</div>
+
+<!-- Confirm -->
+<div class="confirm-overlay" id="confirmOverlay">
+  <div class="confirm-box">
+    <div class="confirm-title" id="cTitle"></div>
+    <p class="confirm-msg" id="cMsg"></p>
+    <div class="confirm-actions">
+      <button class="btn btn-ghost btn-sm" onclick="cResolve(false)">取消</button>
+      <button class="btn btn-danger btn-sm" onclick="cResolve(true)">确认</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script>
+const params=new URLSearchParams(location.search);
+const artId=params.get('id');
+const editMode=params.get('edit')==='1'&&SB.isLoggedIn();
+let _art=null;
+let _blocks=[];   // working copy
+let _coverFile=null;
+
+initConfirm();
+
+// ─────────────────────────────────────────────────────────────
+// BLOCK EDITOR
+// ─────────────────────────────────────────────────────────────
+const BLOCK_TYPES=[
+  {type:'paragraph',label:'段落'},
+  {type:'heading1', label:'标题 H1'},
+  {type:'heading2', label:'标题 H2'},
+  {type:'heading3', label:'标题 H3'},
+  {type:'quote',    label:'引用'},
+  {type:'image',    label:'图片'},
+  {type:'divider',  label:'分割线'},
+];
+
+function newBlock(type){
+  return {id:Math.random().toString(36).slice(2),type,content:'',caption:''};
+}
+
+function renderEditor(){
+  const art=_art;
+  document.title=(art.title||'新文章')+' · 编辑 · VOLTA';
+
+  // Nav right
+  document.getElementById('navRight').innerHTML=`
+    <select id="statusSel" class="fs" style="width:auto;font-size:12px;padding:5px 10px">
+      <option value="draft" ${art.status==='draft'?'selected':''}>草稿</option>
+      <option value="published" ${art.status==='published'?'selected':''}>已发布</option>
+    </select>
+    <button class="btn btn-ghost btn-sm" onclick="saveArticle(false)">保存</button>
+    <button class="btn btn-acc btn-sm" onclick="saveArticle(true)">保存并预览</button>`;
+
+  document.getElementById('pageContent').innerHTML=`
+    <div class="art-header">
+      <div class="art-header-meta">
+        <span class="badge badge-draft" id="statusBadge">草稿</span>
+        <span>${formatDate(art.created_at)}</span>
+      </div>
+      <input class="title-input" id="titleInput" value="${esc(art.title||'')}" placeholder="文章标题…" />
+      <div class="tags-edit">
+        <span style="font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)">标签</span>
+        <input class="fi" id="tagsInput" value="${esc((art.tags||[]).join(', '))}" placeholder="标签（逗号分隔）" style="font-size:13px;padding:5px 10px;flex:1;min-width:0" />
+      </div>
+    </div>
+    <div class="art-header-cover">
+      ${art.cover_image?`<img id="coverPreview" src="${esc(art.cover_image)}" /><button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="removeCover()">移除封面图</button>`
+        :`<div class="cover-upload" id="coverUpload" onclick="document.getElementById('coverInput').click()">点击上传封面图（可选）</div>`}
+      <input type="file" id="coverInput" accept="image/*" style="display:none" onchange="setCover(this.files[0])" />
+    </div>
+    <div class="art-content">
+      <div class="block-editor" id="blockEditor"></div>
+      <div class="be-add-row" style="margin-top:16px">
+        ${BLOCK_TYPES.map(t=>`<button class="be-add-btn" onclick="addBlock('${t.type}')">＋ ${t.label}</button>`).join('')}
+      </div>
+    </div>
+    <div class="editor-bar">
+      <span class="editor-bar-label">编辑模式</span>
+      <button class="btn btn-ghost btn-sm" onclick="saveArticle(false)">保存草稿</button>
+      <button class="btn btn-acc btn-sm" onclick="publishAndView()">发布 →</button>
+    </div>`;
+
+  renderBlocks();
+}
+
+function renderBlocks(){
+  const el=document.getElementById('blockEditor');
+  if(!el)return;
+  el.innerHTML=_blocks.map((b,i)=>renderBlock(b,i)).join('');
+  // Attach textarea auto-resize
+  el.querySelectorAll('textarea.be-input').forEach(ta=>{
+    ta.style.height='auto';
+    ta.style.height=ta.scrollHeight+'px';
+    ta.addEventListener('input',function(){this.style.height='auto';this.style.height=this.scrollHeight+'px';});
+  });
+}
+
+function renderBlock(b,i){
+  const controls=`
+    <div class="be-controls">
+      <button class="be-ctrl" onclick="moveBlock(${i},-1)" title="上移">↑</button>
+      <button class="be-ctrl" onclick="moveBlock(${i},1)" title="下移">↓</button>
+      <button class="be-ctrl danger" onclick="removeBlock(${i})" title="删除">✕</button>
+    </div>`;
+  if(b.type==='divider') return `<div class="be-block"><div class="be-divider-line"></div>${controls}</div>`;
+  if(b.type==='image'){
+    const imgEl=b.url
+      ?`<div><img src="${esc(b.url)}" /><button class="btn btn-ghost btn-sm" style="margin-top:6px;font-size:11px" onclick="removeBlockImage(${i})">移除图片</button></div>`
+      :`<div class="be-image-upload" onclick="document.getElementById('bi-${b.id}').click()">点击上传图片<br/><input type="file" id="bi-${b.id}" accept="image/*" style="display:none" onchange="uploadBlockImage(${i},this.files[0])" /></div>`;
+    return `<div class="be-block">
+      ${controls}
+      <div class="be-image-block">
+        ${imgEl}
+        <input class="be-caption" value="${esc(b.caption||'')}" placeholder="图注（可选）" oninput="_blocks[${i}].caption=this.value" />
+      </div>
+    </div>`;
+  }
+  const cls={heading1:'h1',heading2:'h2',heading3:'h3',quote:'quote',paragraph:''}[b.type]||'';
+  return `<div class="be-block">
+    ${controls}
+    <div class="be-input-wrap">
+      <textarea class="be-input ${cls}" placeholder="${placeholderFor(b.type)}"
+        oninput="_blocks[${i}].content=this.value;this.style.height='auto';this.style.height=this.scrollHeight+'px'"
+        >${esc(b.content||'')}</textarea>
+    </div>
+  </div>`;
+}
+
+function placeholderFor(t){
+  return {heading1:'大标题',heading2:'二级标题',heading3:'小标题',quote:'引用文字…',paragraph:'写点什么…'}[t]||'';
+}
+
+function addBlock(type){
+  _blocks.push(newBlock(type));
+  renderBlocks();
+  // scroll to bottom
+  const ed=document.getElementById('blockEditor');
+  if(ed)ed.lastElementChild?.scrollIntoView({behavior:'smooth',block:'center'});
+}
+function removeBlock(i){ _blocks.splice(i,1); renderBlocks(); }
+function moveBlock(i,d){
+  const j=i+d;
+  if(j<0||j>=_blocks.length)return;
+  [_blocks[i],_blocks[j]]=[_blocks[j],_blocks[i]];
+  renderBlocks();
+}
+function removeBlockImage(i){ _blocks[i].url=''; renderBlocks(); }
+async function uploadBlockImage(i,file){
+  if(!file)return;
+  try{
+    const url=await uploadImage(file);
+    _blocks[i].url=url;
+    renderBlocks();
+    toast('图片已上传 ✓');
+  }catch(e){toast('上传失败：'+e.message,'err');}
+}
+
+function setCover(file){
+  _coverFile=file;
+  const url=URL.createObjectURL(file);
+  const wrap=document.querySelector('.art-header-cover');
+  if(wrap) wrap.innerHTML=`<img id="coverPreview" src="${url}" /><button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="removeCover()">移除封面图</button>`;
+}
+function removeCover(){
+  _coverFile=null;
+  _art.cover_image=null;
+  const wrap=document.querySelector('.art-header-cover');
+  if(wrap) wrap.innerHTML=`<div class="cover-upload" id="coverUpload" onclick="document.getElementById('coverInput').click()">点击上传封面图（可选）</div><input type="file" id="coverInput" accept="image/*" style="display:none" onchange="setCover(this.files[0])" />`;
+}
+
+async function saveArticle(andView=false){
+  const title=document.getElementById('titleInput')?.value.trim()||'';
+  const tags=document.getElementById('tagsInput')?.value.split(/[,，]/).map(t=>t.trim()).filter(Boolean)||[];
+  const status=document.getElementById('statusSel')?.value||'draft';
+  let cover_image=_art.cover_image||null;
+  if(_coverFile){
+    try{cover_image=await uploadImage(_coverFile);_coverFile=null;}
+    catch(e){toast('封面上传失败','err');}
+  }
+  try{
+    await SB.updateArticle(artId,{title,tags,blocks:_blocks,status,cover_image});
+    _art={..._art,title,tags,blocks:_blocks,status,cover_image};
+    toast('已保存 ✓');
+    document.title=(title||'无标题')+' · VOLTA';
+    const badge=document.getElementById('statusBadge');
+    if(badge){badge.textContent=status==='published'?'已发布':'草稿';badge.className='badge '+(status==='published'?'badge-pub':'badge-draft');}
+    if(andView) location.href=`article.html?id=${artId}`;
+  }catch(e){toast('保存失败：'+e.message,'err');}
+}
+async function publishAndView(){
+  document.getElementById('statusSel').value='published';
+  await saveArticle(true);
+}
+
+// ─────────────────────────────────────────────────────────────
+// READER
+// ─────────────────────────────────────────────────────────────
+function renderReader(){
+  const art=_art;
+  document.title=(art.title||'文章')+' · VOLTA';
+  const isAuth=SB.isLoggedIn();
+
+  document.getElementById('navRight').innerHTML=isAuth?`
+    <a href="article.html?id=${artId}&edit=1" class="btn btn-ghost btn-sm">编辑</a>
+    <button class="btn btn-danger btn-sm" onclick="deleteThis()">删除</button>`:'';
+
+  const blocks=art.blocks||[];
+  const bodyHtml=blocks.map(b=>{
+    if(b.type==='heading1')  return `<h1>${esc(b.content)}</h1>`;
+    if(b.type==='heading2')  return `<h2>${esc(b.content)}</h2>`;
+    if(b.type==='heading3')  return `<h3>${esc(b.content)}</h3>`;
+    if(b.type==='paragraph') return b.content?`<p>${esc(b.content)}</p>`:'';
+    if(b.type==='quote')     return `<blockquote><p>${esc(b.content)}</p></blockquote>`;
+    if(b.type==='divider')   return `<hr>`;
+    if(b.type==='image'&&b.url) return `<figure><img src="${esc(b.url)}" loading="lazy" />${b.caption?`<figcaption>${esc(b.caption)}</figcaption>`:''}</figure>`;
+    return '';
+  }).join('');
+
+  document.getElementById('pageContent').innerHTML=`
+    <div class="art-header">
+      <div class="art-header-meta">
+        <span>${formatDate(art.created_at)}</span>
+        ${art.status==='draft'?'<span class="badge badge-draft">草稿</span>':''}
+        ${(art.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}
+      </div>
+      <h1 class="art-header-title">${esc(art.title)}</h1>
+    </div>
+    ${art.cover_image?`<div class="art-header-cover"><img src="${esc(art.cover_image)}" /></div>`:''}
+    <div class="art-content article-body">${bodyHtml}</div>`;
+
+  // Footer
+  const foot=document.createElement('footer');
+  foot.className='footer';foot.style.marginTop='4rem';
+  foot.innerHTML=`<span class="footer-copy">© 2026 VOLTA Studio</span>
+    <nav class="footer-links"><a href="articles.html">← 所有文章</a></nav>`;
+  document.body.appendChild(foot);
+}
+
+async function deleteThis(){
+  const ok=await confirm2('删除文章','确定删除这篇文章？此操作不可撤销。');
+  if(!ok)return;
+  try{await SB.deleteArticle(artId);location.href='articles.html';}
+  catch(e){toast('删除失败','err');}
+}
+
+// ─────────────────────────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────────────────────────
+async function init(){
+  if(!artId){location.href='articles.html';return;}
+  try{
+    _art=await SB.getArticle(artId);
+    if(!_art){document.getElementById('pageContent').innerHTML='<div style="padding:4rem;text-align:center;color:var(--muted)">文章未找到 <a href="articles.html" style="color:var(--acc)">返回列表</a></div>';return;}
+    _blocks=Array.isArray(_art.blocks)?_art.blocks:[];
+    if(editMode) renderEditor();
+    else renderReader();
+  }catch(e){
+    document.getElementById('pageContent').innerHTML=`<div style="padding:4rem;text-align:center;color:#ff6060">加载失败：${e.message}</div>`;
+  }
+}
+init();
+</script>
+</body>
+</html>

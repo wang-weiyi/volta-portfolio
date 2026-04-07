@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>帖子中心 · VOLTA</title>
+<link rel="stylesheet" href="style.css">
+<style>
+body{padding-top:60px}
+.page-wrap{max-width:900px;margin:0 auto;padding:3rem 2rem}
+.top-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:2rem;flex-wrap:wrap;gap:1rem}
+.top-bar h1{font-family:var(--fh);font-size:1.8rem;font-weight:800;letter-spacing:-1px}
+.filter-bar{display:flex;gap:8px;margin-bottom:1.5rem;flex-wrap:wrap}
+.fb{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;padding:5px 12px;border-radius:100px;border:1px solid var(--line2);color:var(--muted);cursor:pointer;transition:all .18s}
+.fb:hover{color:var(--text);border-color:var(--line3)}
+.fb.on{background:var(--acc);color:#000;border-color:var(--acc)}
+/* Post row */
+.post-row{background:var(--bg2);border:1px solid var(--line);border-radius:var(--rl);overflow:hidden;margin-bottom:10px;transition:border-color .2s}
+.post-row.editing{border-color:var(--line3)}
+.post-row-head{display:flex;align-items:center;gap:12px;padding:.9rem 1.1rem;cursor:pointer;user-select:none}
+.post-row-head:hover{background:rgba(255,255,255,.02)}
+.post-thumb{width:60px;height:45px;border-radius:var(--r);object-fit:cover;background:var(--bg3);flex-shrink:0}
+.post-thumb-ph{width:60px;height:45px;border-radius:var(--r);background:var(--bg3);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.post-info{flex:1;min-width:0}
+.post-row-title{font-family:var(--fh);font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.post-row-meta{font-size:11px;color:var(--muted);margin-top:2px;display:flex;gap:10px;flex-wrap:wrap}
+.post-row-actions{display:flex;gap:6px;flex-shrink:0}
+/* Edit panel */
+.edit-panel{display:none;border-top:1px solid var(--line);padding:1.25rem}
+.edit-panel.open{display:block}
+/* Image editor */
+.img-editor{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;margin-bottom:8px}
+.img-slot{position:relative;width:80px;height:60px;border-radius:var(--r);border:1px solid var(--line2);overflow:hidden;background:var(--bg3);flex-shrink:0;cursor:grab}
+.img-slot img{width:100%;height:100%;object-fit:cover;display:block}
+.img-slot .rm{position:absolute;top:2px;right:2px;width:16px;height:16px;border-radius:50%;background:rgba(0,0,0,.78);color:#fff;font-size:9px;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:2}
+.img-slot.new-img{outline:2px solid var(--acc)}
+.img-add-btn{width:80px;height:60px;border-radius:var(--r);border:1px dashed var(--line2);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;color:var(--muted);font-size:20px;transition:all .18s}
+.img-add-btn:hover{border-color:rgba(200,255,0,.4);color:var(--acc)}
+/* Checkbox group */
+.check-group{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.check-row{display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer}
+.check-row input{accent-color:var(--acc);width:15px;height:15px;cursor:pointer}
+</style>
+</head>
+<body>
+<nav class="nav">
+  <a href="index.html" class="nav-back">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+    返回主页
+  </a>
+  <span style="font-family:var(--fh);font-size:14px;font-weight:700;color:var(--muted)">帖子中心</span>
+  <button class="btn btn-acc btn-sm auth-only" id="newPostBtn" onclick="openNew()">+ 新建帖子</button>
+</nav>
+
+<div class="page-wrap">
+  <div class="top-bar">
+    <h1>帖子中心</h1>
+    <div style="font-size:13px;color:var(--muted)" id="postCount"></div>
+  </div>
+  <div class="filter-bar" id="filterBar"></div>
+  <div id="postList"><div style="color:var(--muted);font-size:14px">加载中…</div></div>
+</div>
+
+<!-- New Post Modal -->
+<div class="modal-overlay" id="newModal">
+  <div class="modal">
+    <div class="modal-head">
+      <span class="modal-title">新建帖子</span>
+      <button class="modal-close" onclick="closeModal('newModal')">✕</button>
+    </div>
+    <div class="fg"><label class="fl">标题</label><input class="fi" id="nmTitle" placeholder="标题…" /></div>
+    <div class="fg"><label class="fl">内容</label><textarea class="ft" id="nmContent" placeholder="描述…"></textarea></div>
+    <div class="fg">
+      <label class="fl">图片</label>
+      <div class="upload-zone" id="nmZone">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--muted);margin:0 auto"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+        <p>点击或拖拽上传</p>
+        <input type="file" id="nmImg" multiple accept="image/*" style="display:none" />
+      </div>
+      <div class="upload-previews" id="nmPreviews"></div>
+    </div>
+    <div class="fg"><label class="fl">标签</label><input class="fi" id="nmTags" placeholder="建筑, Blender…" /></div>
+    <div class="fg">
+      <label class="fl">归属</label>
+      <label class="check-row" style="margin-bottom:8px"><input type="checkbox" id="nmGallery" checked /> 显示在主页画廊</label>
+      <select class="fs" id="nmProj" style="margin-bottom:6px"><option value="">— 不归属项目 —</option></select>
+      <select class="fs" id="nmSp"><option value="">— 不归属子项目 —</option></select>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('newModal')">取消</button>
+      <button class="btn btn-acc btn-sm" id="nmSubmit" onclick="submitNew()">发布</button>
+    </div>
+  </div>
+</div>
+
+<!-- Confirm -->
+<div class="confirm-overlay" id="confirmOverlay">
+  <div class="confirm-box">
+    <div class="confirm-title" id="cTitle"></div>
+    <p class="confirm-msg" id="cMsg"></p>
+    <div class="confirm-actions">
+      <button class="btn btn-ghost btn-sm" onclick="cResolve(false)">取消</button>
+      <button class="btn btn-danger btn-sm" onclick="cResolve(true)">删除</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script>
+let _posts=[], _projects=[], _filter='all';
+const newUp=makeUploader();
+
+function closeModal(id){document.getElementById(id).classList.remove('open')}
+function openModal(id){document.getElementById(id).classList.add('open')}
+document.getElementById('newModal').addEventListener('click',e=>{if(e.target.id==='newModal')closeModal('newModal')});
+initConfirm();
+applyAuthUI();
+
+// ── Filters ──
+function renderFilterBar(){
+  const counts={all:_posts.length,gallery:0,project:0,none:0};
+  _posts.forEach(p=>{
+    if(p.show_in_gallery)counts.gallery++;
+    if(p.project_id)counts.project++;
+    if(!p.show_in_gallery&&!p.project_id)counts.none++;
+  });
+  const tabs=[
+    {k:'all',l:'全部'},
+    {k:'gallery',l:'画廊'},
+    {k:'project',l:'项目记录'},
+    {k:'none',l:'仅存档'},
+  ];
+  document.getElementById('filterBar').innerHTML=tabs.map(t=>
+    `<button class="fb ${_filter===t.k?'on':''}" onclick="setFilter('${t.k}')">${t.l} <span style="opacity:.6">${counts[t.k]}</span></button>`
+  ).join('');
+}
+function setFilter(f){_filter=f;renderFilterBar();renderList();}
+
+// ── Render list ──
+function renderList(){
+  const isAuth=SB.isLoggedIn();
+  let posts=_posts;
+  if(_filter==='gallery')  posts=_posts.filter(p=>p.show_in_gallery);
+  if(_filter==='project')  posts=_posts.filter(p=>!!p.project_id);
+  if(_filter==='none')     posts=_posts.filter(p=>!p.show_in_gallery&&!p.project_id);
+  document.getElementById('postCount').textContent=`共 ${posts.length} 条`;
+
+  if(!posts.length){
+    document.getElementById('postList').innerHTML=`<div class="empty-state"><p>暂无帖子</p></div>`;
+    return;
+  }
+  document.getElementById('postList').innerHTML=posts.map(p=>{
+    const proj=_projects.find(j=>j.id===p.project_id);
+    const sp=proj?.sub_projects?.find(s=>s.id===p.sub_project_id);
+    const thumb=p.images&&p.images[0]
+      ?`<img class="post-thumb" src="${esc(p.images[0])}" />`
+      :`<div class="post-thumb-ph"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:.2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></div>`;
+    const labels=[];
+    if(p.show_in_gallery) labels.push('<span class="badge badge-active">画廊</span>');
+    if(proj) labels.push(`<span style="font-size:11px;color:${proj.color}">${esc(proj.name)}${sp?' › '+esc(sp.name):''}</span>`);
+    return `<div class="post-row" id="row-${p.id}">
+      <div class="post-row-head" onclick="toggleEdit('${p.id}')">
+        ${thumb}
+        <div class="post-info">
+          <div class="post-row-title">${esc(p.title||'（无标题）')}</div>
+          <div class="post-row-meta">
+            <span>${formatDate(p.created_at)}</span>
+            <span>${(p.images||[]).length} 张图</span>
+            ${labels.join('')}
+          </div>
+        </div>
+        ${isAuth?`<div class="post-row-actions" onclick="event.stopPropagation()">
+          <button class="btn btn-danger btn-sm btn-icon" onclick="deletePost('${p.id}')" title="删除">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+          </button>
+        </div>`:''}
+      </div>
+      <div class="edit-panel" id="panel-${p.id}"></div>
+    </div>`;
+  }).join('');
+}
+
+// ── Toggle edit panel ──
+const _openPanels=new Set();
+function toggleEdit(id){
+  const panel=document.getElementById(`panel-${id}`);
+  const row=document.getElementById(`row-${id}`);
+  if(_openPanels.has(id)){
+    panel.classList.remove('open');row.classList.remove('editing');
+    _openPanels.delete(id);
+  } else {
+    _openPanels.add(id);
+    panel.classList.add('open');row.classList.add('editing');
+    renderEditPanel(id);
+  }
+}
+
+// ── Edit panel ──
+const _imgEditors={};
+function renderEditPanel(id){
+  const p=_posts.find(x=>x.id===id);if(!p)return;
+  const panel=document.getElementById(`panel-${id}`);
+  const proj=_projects.find(j=>j.id===p.project_id);
+  const spOpts=(proj?.sub_projects||[]).map(s=>`<option value="${s.id}" ${s.id===p.sub_project_id?'selected':''}>${esc(s.name)}</option>`).join('');
+  panel.innerHTML=`
+    <div class="fg"><label class="fl">标题</label><input class="fi" id="et-title-${id}" value="${esc(p.title||'')}" /></div>
+    <div class="fg"><label class="fl">内容</label><textarea class="ft" id="et-content-${id}" style="min-height:80px">${esc(p.content||'')}</textarea></div>
+    <div class="fg">
+      <label class="fl">图片 <span style="color:var(--muted);font-weight:400;font-size:10px">· 第一张为画廊封面 · 绿色边框=新上传待保存</span></label>
+      <div class="img-editor" id="ie-${id}"></div>
+      <div class="img-add-btn" onclick="document.getElementById('ie-input-${id}').click()" title="添加图片">＋</div>
+      <input type="file" id="ie-input-${id}" multiple accept="image/*" style="display:none" onchange="ieAddFiles('${id}',this.files);this.value=''" />
+    </div>
+    <div class="fg"><label class="fl">标签</label><input class="fi" id="et-tags-${id}" value="${esc((p.tags||[]).join(', '))}" /></div>
+    <div class="fg">
+      <label class="fl">归属</label>
+      <div class="check-group" style="margin-bottom:8px">
+        <label class="check-row"><input type="checkbox" id="et-gallery-${id}" ${p.show_in_gallery?'checked':''} /> 显示在主页画廊</label>
+      </div>
+      <select class="fs" id="et-proj-${id}" onchange="etProjChange('${id}')" style="margin-bottom:6px">
+        <option value="">— 不归属项目 —</option>
+        ${_projects.map(j=>`<option value="${j.id}" ${j.id===p.project_id?'selected':''}>${esc(j.name)}</option>`).join('')}
+      </select>
+      <select class="fs" id="et-sp-${id}">
+        <option value="">— 不归属子项目 —</option>${spOpts}
+      </select>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-ghost btn-sm" onclick="toggleEdit('${id}')">取消</button>
+      <button class="btn btn-acc btn-sm" id="et-save-${id}" onclick="savePost('${id}')">保存</button>
+    </div>`;
+  // Init image editor
+  _imgEditors[id]=makeImageEditor(document.getElementById(`ie-${id}`), p.images||[]);
+}
+
+function etProjChange(id){
+  const projId=document.getElementById(`et-proj-${id}`).value;
+  const proj=_projects.find(j=>j.id===projId);
+  document.getElementById(`et-sp-${id}`).innerHTML='<option value="">— 不归属子项目 —</option>'+
+    ((proj?.sub_projects||[]).map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join(''));
+}
+
+function ieAddFiles(id,fileList){
+  const ed=_imgEditors[id];if(ed)ed.addFiles(fileList);
+}
+
+async function savePost(id){
+  const btn=document.getElementById(`et-save-${id}`);
+  btn.textContent='保存中…';btn.disabled=true;
+  try{
+    const ed=_imgEditors[id];
+    btn.textContent='上传图片…';
+    const images=ed?await ed.getImages():[];
+    const title=document.getElementById(`et-title-${id}`).value.trim();
+    const content=document.getElementById(`et-content-${id}`).value.trim();
+    const tags=document.getElementById(`et-tags-${id}`).value.split(/[,，]/).map(t=>t.trim()).filter(Boolean);
+    const showInGallery=document.getElementById(`et-gallery-${id}`).checked;
+    const projectId=document.getElementById(`et-proj-${id}`).value||null;
+    const subProjectId=document.getElementById(`et-sp-${id}`).value||null;
+    btn.textContent='保存中…';
+    await SB.updatePost(id,{title,content,tags,images,show_in_gallery:showInGallery,project_id:projectId,sub_project_id:subProjectId});
+    toast('已保存 ✓');
+    // refresh
+    const updated=await SB.getPost(id);
+    const idx=_posts.findIndex(p=>p.id===id);
+    if(idx>=0&&updated)_posts[idx]=updated;
+    _openPanels.delete(id);
+    renderFilterBar();renderList();
+    // re-open
+    setTimeout(()=>{toggleEdit(id);},50);
+  }catch(e){toast('保存失败：'+e.message,'err');}
+  btn.textContent='保存';btn.disabled=false;
+}
+
+async function deletePost(id){
+  const ok=await confirm2('删除帖子','确定删除这条帖子？此操作不可撤销。');
+  if(!ok)return;
+  try{
+    await SB.deletePost(id);toast('已删除');
+    _posts=_posts.filter(p=>p.id!==id);
+    _openPanels.delete(id);
+    renderFilterBar();renderList();
+  }catch(e){toast('删除失败','err');}
+}
+
+// ── New Post ──
+function openNew(){
+  newUp.reset(document.getElementById('nmPreviews'));
+  ['nmTitle','nmContent','nmTags'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('nmGallery').checked=true;
+  document.getElementById('nmProj').innerHTML='<option value="">— 不归属项目 —</option>'+
+    _projects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  document.getElementById('nmSp').innerHTML='<option value="">— 不归属子项目 —</option>';
+  document.getElementById('nmProj').onchange=()=>{
+    const proj=_projects.find(p=>p.id===document.getElementById('nmProj').value);
+    document.getElementById('nmSp').innerHTML='<option value="">— 不归属子项目 —</option>'+
+      ((proj?.sub_projects||[]).map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join(''));
+  };
+  openModal('newModal');
+}
+async function submitNew(){
+  const btn=document.getElementById('nmSubmit');btn.disabled=true;
+  try{
+    const files=newUp.getFiles();
+    let urls=[];
+    if(files.length){btn.textContent='上传图片…';urls=await uploadImages(files);}
+    btn.textContent='发布中…';
+    const title=document.getElementById('nmTitle').value.trim();
+    if(!title){toast('请填写标题','err');btn.textContent='发布';btn.disabled=false;return;}
+    const post=await SB.addPost({
+      title,
+      content:document.getElementById('nmContent').value.trim(),
+      tags:document.getElementById('nmTags').value.split(/[,，]/).map(t=>t.trim()).filter(Boolean),
+      images:urls,
+      showInGallery:document.getElementById('nmGallery').checked,
+      projectId:document.getElementById('nmProj').value||null,
+      subProjectId:document.getElementById('nmSp').value||null,
+    });
+    closeModal('newModal');toast('发布成功 ✓');
+    if(post)_posts.unshift(post);
+    renderFilterBar();renderList();
+    // Check if ?edit= param should auto-open
+    if(post)setTimeout(()=>toggleEdit(post.id),100);
+  }catch(e){toast('发布失败：'+e.message,'err');}
+  btn.textContent='发布';btn.disabled=false;
+}
+
+async function init(){
+  // Check for ?edit= URL param
+  const params=new URLSearchParams(location.search);
+  const editId=params.get('edit');
+  try{
+    [_posts,_projects]=await Promise.all([SB.getPosts({}),SB.getProjects()]);
+    renderFilterBar();renderList();
+    if(editId){
+      // scroll to and open that post
+      setTimeout(()=>{
+        const row=document.getElementById(`row-${editId}`);
+        if(row){row.scrollIntoView({behavior:'smooth',block:'center'});toggleEdit(editId);}
+      },200);
+    }
+  }catch(e){document.getElementById('postList').innerHTML=`<div style="color:#ff6060;font-size:13px">加载失败：${e.message}</div>`;}
+}
+
+newUp.mount(document.getElementById('nmZone'),document.getElementById('nmImg'),document.getElementById('nmPreviews'));
+init();
+</script>
+</body>
+</html>
