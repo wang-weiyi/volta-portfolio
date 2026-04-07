@@ -424,8 +424,11 @@ function startTransitionLoop() {
 let tileRendering = false;  // true while tiled render is in progress
 let pendingOffset = null;   // queued click while rendering
 
+// Target: each tile renders in under ~50ms GPU time to avoid timeout
+// and leaves gaps for main-thread compositing
 const TILE_COLS = 4;
 const TILE_ROWS = 4;
+const TILE_BREATHE_MS = 16; // gap between tiles — one main-thread frame
 
 function renderFractalToFBO() {
   const w = canvas.width, h = canvas.height;
@@ -476,7 +479,7 @@ function renderFractalToFBO() {
   const myGen = renderGen;
   let tileIdx = 0;
 
-  function renderNextTile() {
+  function submitNextTile() {
     if (myGen !== renderGen) { finish(); return; }
     if (tileIdx >= tiles.length) { finish(); return; }
 
@@ -484,13 +487,26 @@ function renderFractalToFBO() {
     gl.scissor(tile.x, tile.y, tile.w, tile.h);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-    // Force GPU to finish this tile before proceeding
+    // Non-blocking fence to detect GPU completion of this tile
+    const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
     gl.flush();
-    const _px = new Uint8Array(4);
-    gl.readPixels(tile.x, tile.y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, _px);
 
-    // Yield to message loop, then render next tile
-    setTimeout(renderNextTile, 0);
+    function pollTile() {
+      if (myGen !== renderGen) {
+        gl.deleteSync(sync);
+        finish();
+        return;
+      }
+      const status = gl.getSyncParameter(sync, gl.SYNC_STATUS);
+      if (status !== gl.SIGNALED) {
+        setTimeout(pollTile, 4);
+        return;
+      }
+      gl.deleteSync(sync);
+      // Breathe: give main thread GPU time before next tile
+      setTimeout(submitNextTile, TILE_BREATHE_MS);
+    }
+    setTimeout(pollTile, 4);
   }
 
   function finish() {
@@ -499,7 +515,6 @@ function renderFractalToFBO() {
     tileRendering = false;
 
     if (myGen !== renderGen) {
-      // Cancelled — process queued render
       if (pendingOffset) {
         currentOffset = pendingOffset;
         pendingOffset = null;
@@ -526,7 +541,6 @@ function renderFractalToFBO() {
       self.postMessage({ type: 'renderDone' });
     }
 
-    // Process queued render if any
     if (pendingOffset) {
       currentOffset = pendingOffset;
       pendingOffset = null;
@@ -534,7 +548,7 @@ function renderFractalToFBO() {
     }
   }
 
-  renderNextTile();
+  submitNextTile();
 }
 
 // ── Message handler ────────────────────────────────────────────────────────
