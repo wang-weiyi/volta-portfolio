@@ -282,7 +282,7 @@ let renderGen = 0; // Cancellation token: incremented on each new render request
 
 const MOUSE_STRENGTH = 0.285;
 const DEBOUNCE_MS    = 350;
-const TRANSITION_MS  = 900;
+const TRANSITION_MS  = 1800;
 
 // 当前渲染状态（由点击驱动）
 let currentOffset = [0, 0];
