@@ -364,19 +364,21 @@ const FractalBG = (() => {
 
       hud.init(canvas);
 
-      // 尝试 Worker 路径：需要 transferControlToOffscreen 且 OffscreenCanvas 支持 WebGL2
-      if (canvas.transferControlToOffscreen && canWorkerRender()) {
+      // 移动端 / 触屏设备：跳过 Worker，直接主线程渲染
+      // Worker + OffscreenCanvas WebGL2 在移动端即使初始化成功，实际渲染也可能静默失败
+      const isMobile = navigator.maxTouchPoints > 1;
+
+      if (!isMobile && canvas.transferControlToOffscreen && canWorkerRender()) {
         try {
           initWorkerPath(canvas);
           return true;
         } catch (err) {
           console.warn('FractalBG: Worker path threw:', err);
-          // canvas 可能已被 transfer，需要替换
         }
       }
 
-      // 直接走主线程渲染
-      console.info('FractalBG: using main-thread WebGL2 fallback');
+      if (isMobile) console.info('FractalBG: mobile detected, using main-thread rendering');
+      else console.info('FractalBG: using main-thread WebGL2 fallback');
       return initMainThreadPath(canvas);
     },
 
