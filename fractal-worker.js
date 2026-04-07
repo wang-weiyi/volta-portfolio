@@ -421,19 +421,23 @@ function startTransitionLoop() {
   transitionTimer = setTimeout(tick, 16);
 }
 
-let pendingSync = null;   // fence from in-progress render
-let pendingOffset = null; // queued click while GPU is busy
+let tileRendering = false;  // true while tiled render is in progress
+let pendingOffset = null;   // queued click while rendering
+
+const TILE_COLS = 4;
+const TILE_ROWS = 4;
 
 function renderFractalToFBO() {
   const w = canvas.width, h = canvas.height;
 
-  // If GPU is still rendering, queue this request instead of overwriting fboB
-  if (pendingSync) {
+  // If already rendering, queue this request
+  if (tileRendering) {
     pendingOffset = [...currentOffset];
     return;
   }
 
   ++renderGen;
+  tileRendering = true;
 
   if (!fboA || fboA.w !== w || fboA.h !== h) {
     fboA = makeFBO(gl, w, h);
@@ -448,32 +452,61 @@ function renderFractalToFBO() {
     const tmp = fboA; fboA = fboB; fboB = tmp;
   }
 
+  // Build tile list
+  const tileW = Math.ceil(w / TILE_COLS);
+  const tileH = Math.ceil(h / TILE_ROWS);
+  const tiles = [];
+  for (let ty = 0; ty < TILE_ROWS; ty++) {
+    for (let tx = 0; tx < TILE_COLS; tx++) {
+      tiles.push({
+        x: tx * tileW,
+        y: ty * tileH,
+        w: Math.min(tileW, w - tx * tileW),
+        h: Math.min(tileH, h - ty * tileH),
+      });
+    }
+  }
+
   gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
   gl.viewport(0, 0, w, h);
   gl.useProgram(fractalProg);
   setFractalUniforms(gl, fractalUniforms, currentOffset, w, h);
-  gl.drawArrays(gl.TRIANGLES, 0, 3);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.enable(gl.SCISSOR_TEST);
 
-  pendingSync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
-  gl.flush();
+  const myGen = renderGen;
+  let tileIdx = 0;
 
-  function pollFence() {
-    // Use getSyncParameter (guaranteed non-blocking) instead of clientWaitSync
-    const signaled = gl.getSyncParameter(pendingSync, gl.SYNC_STATUS) === gl.SIGNALED;
-    if (!signaled) {
-      setTimeout(pollFence, 50);
+  function renderNextTile() {
+    if (myGen !== renderGen) { finish(); return; }
+    if (tileIdx >= tiles.length) { finish(); return; }
+
+    const tile = tiles[tileIdx++];
+    gl.scissor(tile.x, tile.y, tile.w, tile.h);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    // Force GPU to finish this tile before proceeding
+    gl.flush();
+    const _px = new Uint8Array(4);
+    gl.readPixels(tile.x, tile.y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, _px);
+
+    // Yield to message loop, then render next tile
+    setTimeout(renderNextTile, 0);
+  }
+
+  function finish() {
+    gl.disable(gl.SCISSOR_TEST);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    tileRendering = false;
+
+    if (myGen !== renderGen) {
+      // Cancelled — process queued render
+      if (pendingOffset) {
+        currentOffset = pendingOffset;
+        pendingOffset = null;
+        renderFractalToFBO();
+      }
       return;
     }
-    gl.deleteSync(pendingSync);
-
-    // Force full GPU completion — readPixels blocks until fboB is truly done
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
-    const _px = new Uint8Array(4);
-    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, _px);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-
-    pendingSync = null;
 
     if (!fboAValid) {
       gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fboB.fbo);
@@ -500,7 +533,8 @@ function renderFractalToFBO() {
       renderFractalToFBO();
     }
   }
-  setTimeout(pollFence, 100);
+
+  renderNextTile();
 }
 
 // ── Message handler ────────────────────────────────────────────────────────
