@@ -264,9 +264,6 @@ void main() {
   vec2  sortedUV  = vec2(uv.x, clamp(uv.y + shift, 0.001, 0.999));
   vec4  colA_sort = texture(u_texA, sortedUV);
 
-  float scanFlash = exp(-pow((colT - 0.5) * 9.0, 2.0)) * 0.22;
-  colA_sort.rgb  += scanFlash * vec3(0.5, 0.72, 1.0);
-
   float revealT = smoothstep(0.50, 0.90, colT);
   fragColor = clamp(mix(colA_sort, texture(u_texB, uv), revealT), 0.0, 1.0);
 }`;
