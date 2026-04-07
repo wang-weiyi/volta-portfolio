@@ -288,9 +288,14 @@ const MOUSE_STRENGTH = 0.285;
 const DEBOUNCE_MS    = 350;
 const TRANSITION_MS  = 900;
 
-// GPU budget per tile: once drawArrays starts, GPU is non-preemptible.
-// This is the max compositor stall per tile. Must be < 1 vsync (16ms).
-const TARGET_GPU_MS = 4;
+// Fixed tile size: small enough that each drawArrays is a short GPU job.
+// The compositor can interleave its work between tiles at the driver level.
+const TILE_SIZE = 64;
+
+// Delay between tiles (ms). Gives compositor guaranteed GPU-free windows.
+// Total render time = (w*h / TILE_SIZE^2) * (gpu_per_tile + TILE_YIELD_MS).
+// For 3840×2160 @ 64px tiles ≈ 2000 tiles × ~20ms = ~40s. Slow but jank-free.
+const TILE_YIELD_MS = 16;
 
 // ── GL helpers ─────────────────────────────────────────────────────────────
 function compileShader(g, type, src) {
@@ -393,13 +398,13 @@ function drawDisplay(t) {
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 }
 
-// Transition loop: runs AFTER gl.finish() so GPU is free; each frame is fast.
 function startTransitionLoop() {
   if (transitionTimer !== null) return;
   function tick() {
     if (!isTransitioning) { transitionTimer = null; return; }
     const t = Math.min((performance.now() - transitionStart) / TRANSITION_MS, 1.0);
     drawDisplay(t);
+    gl.flush();
     if (t >= 1.0) {
       isTransitioning = false;
       transitionTimer = null;
@@ -411,17 +416,26 @@ function startTransitionLoop() {
   transitionTimer = setTimeout(tick, 16);
 }
 
-// ── Adaptive tiled fractal render ─────────────────────────────────────────
-// Key insight: gl.finish() blocks ONLY the worker thread, not the main thread
-// or compositor. By measuring actual GPU time per batch and keeping it under
-// TARGET_GPU_MS, the compositor always gets GPU access within one batch window.
+// ── Tiled fractal render (no GPU sync) ────────────────────────────────────
 //
-// Flow per batch:
-//   drawArrays (submit to GPU) → gl.finish() (worker waits; GPU executes)
-//   → setTimeout(0) (yield worker event loop; compositor gets GPU window)
-//   → next batch
+// Why gl.finish() caused jank:
+//   Chrome routes ALL GPU work (WebGL + compositor) through a single GPU
+//   process. gl.finish() forces a synchronous round-trip to the GPU process,
+//   during which the GPU process cannot service compositor requests.
+//   Hundreds of finish() calls = hundreds of GPU-process stalls = jank.
 //
-// Batch height adapts: if GPU took too long → fewer rows; too fast → more rows.
+// This version never calls gl.finish(). Instead:
+//   1. Submit one small tile via drawArrays
+//   2. gl.flush() — push commands to GPU, return immediately (non-blocking)
+//   3. setTimeout(TILE_YIELD_MS) — sleep the worker for one full frame
+//      During this sleep:
+//        - GPU executes our tile asynchronously
+//        - Compositor submits & executes its own work
+//        - Main thread is completely free
+//   4. Next tile
+//
+// The GPU driver interleaves compositor and our tiles at the hardware level.
+// No process-level sync, no stalls, no jank.
 
 async function renderFractalToFBO(offset) {
   const w = canvas.width, h = canvas.height;
@@ -442,57 +456,40 @@ async function renderFractalToFBO(offset) {
 
   gl.useProgram(fractalProg);
   setFractalUniforms(gl, fractalUniforms, offset, w, h);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
+  gl.viewport(0, 0, w, h);
+  gl.enable(gl.SCISSOR_TEST);
 
-  // ── Adaptive tile-based rendering ──────────────────────────
-  // Row-based batching fails when even 1 full-width row exceeds the GPU
-  // budget (e.g. 3840px × heavy shader > 16ms). Tiles cut BOTH dimensions,
-  // so a 64×64 tile = 4096 fragments — small enough for <4ms on most GPUs.
-  //
-  // Tile side length adapts: after each tile we measure actual GPU time,
-  // compute ms-per-pixel, and resize to hit TARGET_GPU_MS.
-
-  let tileSide = 64; // starting guess; adapts after first measurement
-
-  for (let y = 0; y < h;) {
-    for (let x = 0; x < w;) {
-      if (gen !== renderGen) return; // newer request — abort
-
-      const tw = Math.min(tileSide, w - x);
-      const th = Math.min(tileSide, h - y);
-
-      gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
-      gl.viewport(0, 0, w, h);
-      gl.enable(gl.SCISSOR_TEST);
-      gl.scissor(x, y, tw, th);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-      gl.disable(gl.SCISSOR_TEST);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-
-      // gl.finish() blocks worker only; measures real GPU time for this tile
-      const t0 = performance.now();
-      gl.finish();
-      const gpuMs = performance.now() - t0;
-
-      // Adapt tile size based on measured cost per pixel
-      const pixels = tw * th;
-      if (gpuMs > 0.01) {
-        const msPerPx    = gpuMs / pixels;
-        const wantPixels = TARGET_GPU_MS / msPerPx;
-        const wantSide   = Math.sqrt(wantPixels);
-        // Smooth adjustment: blend 60% toward target to avoid oscillation
-        tileSide = Math.max(16, Math.min(256,
-          Math.round(tileSide * 0.4 + wantSide * 0.6)));
+  for (let y = 0; y < h; y += TILE_SIZE) {
+    for (let x = 0; x < w; x += TILE_SIZE) {
+      if (gen !== renderGen) {
+        gl.disable(gl.SCISSOR_TEST);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        return;
       }
 
-      x += tw;
+      const tw = Math.min(TILE_SIZE, w - x);
+      const th = Math.min(TILE_SIZE, h - y);
 
-      // Yield after every tile: compositor gets a GPU-free window
-      await new Promise(r => setTimeout(r, 0));
+      gl.scissor(x, y, tw, th);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+      // Non-blocking submit: push to GPU command queue, don't wait
+      gl.flush();
+
+      // Yield for one full frame — compositor has ample GPU time
+      await new Promise(r => setTimeout(r, TILE_YIELD_MS));
     }
-    y += tileSide; // use current (adapted) tileSide for next row of tiles
   }
 
+  gl.disable(gl.SCISSOR_TEST);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
   if (gen !== renderGen) return;
+
+  // One gl.finish() here only: ensure ALL tiles are done before transition.
+  // This is a single sync at the very end, not per-tile.
+  gl.finish();
 
   if (!fboAValid) {
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fboB.fbo);
