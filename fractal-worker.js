@@ -448,15 +448,22 @@ function renderFractalToFBO() {
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.flush();
 
-  // GPU is now executing the fractal asynchronously.
-  // We cannot know when it finishes without blocking, so we wait a fixed
-  // delay (generous enough for the GPU to complete on most machines)
-  // before starting the transition. If the transition reads fboB too early,
-  // it will show a partially-rendered frame — acceptable since fboA still
-  // shows the previous complete frame during transition.
-  setTimeout(() => {
+  // Use fence sync to detect when GPU finishes rendering
+  const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+  gl.flush();
+  const myGen = renderGen;
+
+  function pollFence() {
+    if (myGen !== renderGen) { gl.deleteSync(sync); return; }
+    const status = gl.clientWaitSync(sync, 0, 0);
+    if (status === gl.WAIT_FAILED) { gl.deleteSync(sync); return; }
+    if (status === gl.TIMEOUT_EXPIRED) {
+      setTimeout(pollFence, 50);
+      return;
+    }
+    // GPU done (ALREADY_SIGNALED or CONDITION_SATISFIED)
+    gl.deleteSync(sync);
     if (!fboAValid) {
-      // First frame: blit fboB → fboA and display immediately
       gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fboB.fbo);
       gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, fboA.fbo);
       gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
@@ -473,7 +480,8 @@ function renderFractalToFBO() {
     transitionStart = performance.now();
     startTransitionLoop();
     self.postMessage({ type: 'renderDone' });
-  }, 3000); // wait 3s — generous budget for heavy shader on any GPU
+  }
+  setTimeout(pollFence, 100);
 }
 
 // ── Message handler ────────────────────────────────────────────────────────
