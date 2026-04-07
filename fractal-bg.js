@@ -62,11 +62,9 @@ const FractalBG = (() => {
         });
       });
 
-      // ── 滚轮事件：累计滚动距离，发送给 Worker 更新光照方向 ──
-      let totalScrollY = 0;
-      window.addEventListener('wheel', (e) => {
-        totalScrollY += e.deltaY;
-        worker.postMessage({ type: 'scroll', totalY: totalScrollY });
+      // ── 滚动事件：用页面实际位置驱动光照，同一位置光照恒定 ──
+      window.addEventListener('scroll', () => {
+        worker.postMessage({ type: 'scroll', scrollY: window.scrollY });
       }, { passive: true });
 
       return true;

@@ -276,7 +276,6 @@ let gl, fractalProg, displayProg;
 let fractalUniforms = {}, displayUniforms = {};
 let fboA = null, fboB = null;
 let fboAValid = false;
-let pendingOffset = [0, 0];
 let transitionStart = 0;
 let isTransitioning = false;
 let transitionTimer = null;
@@ -424,6 +423,33 @@ function startTransitionLoop() {
   transitionTimer = setTimeout(tick, 16);
 }
 
+// ── 滚动光照更新：直接覆写 fboA，无过渡动画 ──────────────────────────────
+// WebGL 同一上下文内命令有序执行，无需 setTimeout 等待 GPU 完成
+function renderScrollLighting() {
+  if (!fboAValid || !canvas || !gl) return;
+  const w = canvas.width, h = canvas.height;
+  if (!fboA || fboA.w !== w || fboA.h !== h) return;
+
+  // 若正在过渡中，中止过渡，直接以当前光照更新画面
+  if (isTransitioning) {
+    isTransitioning = false;
+    clearTimeout(transitionTimer);
+    transitionTimer = null;
+  }
+
+  const lightDir = calcLightDir(currentScrollY);
+
+  // 直接渲染进 fboA（当前展示缓冲），随即显示
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fboA.fbo);
+  gl.viewport(0, 0, w, h);
+  gl.useProgram(fractalProg);
+  setFractalUniforms(gl, fractalUniforms, currentOffset, w, h, lightDir);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  drawDisplay(0.0);
+  gl.flush();
+}
+
 function renderFractalToFBO() {
   const w = canvas.width, h = canvas.height;
   ++renderGen;
@@ -520,8 +546,7 @@ self.addEventListener('message', (e) => {
     renderFractalToFBO();
 
   } else if (type === 'scroll') {
-    currentScrollY = e.data.totalY;
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => renderFractalToFBO(), DEBOUNCE_MS);
+    currentScrollY = e.data.scrollY;
+    renderScrollLighting();
   }
 });
