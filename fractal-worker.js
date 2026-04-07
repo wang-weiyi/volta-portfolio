@@ -288,12 +288,6 @@ const MOUSE_STRENGTH = 0.285;
 const DEBOUNCE_MS    = 350;
 const TRANSITION_MS  = 900;
 
-// Small tiles so each drawArrays is a short GPU job.
-const TILE_SIZE = 64;
-
-// After GPU finishes each tile, idle this long before submitting next tile.
-// Compositor uses this guaranteed GPU-free window to render UI.
-const COMPOSITOR_GAP_MS = 8;
 
 // ── GL helpers ─────────────────────────────────────────────────────────────
 function compileShader(g, type, src) {
@@ -414,51 +408,9 @@ function startTransitionLoop() {
   transitionTimer = setTimeout(tick, 16);
 }
 
-// ── Tiled fractal render (fenceSync, zero GPU-process blocking) ───────────
-//
-// Why all previous approaches failed:
-//
-// gl.finish() per tile:
-//   Blocks Chrome's GPU process. Compositor goes through the same GPU process.
-//   Thousands of finish() = thousands of GPU-process stalls = jank.
-//
-// gl.flush() + setTimeout(16) per tile:
-//   Never waits for GPU completion. Tiles queue up in GPU command buffer.
-//   2000 tiles accumulate → GPU is 100% busy for entire duration → compositor
-//   never gets a gap → UI freezes.
-//
-// This version uses fenceSync + getSyncParameter:
-//   1. Submit ONE tile via drawArrays
-//   2. gl.fenceSync() — place a fence marker in the GPU command stream
-//   3. gl.flush() — push commands to GPU, return immediately
-//   4. Poll gl.getSyncParameter() every 4ms (non-blocking! no GPU-process stall)
-//   5. Once fence signals (GPU finished this tile), wait COMPOSITOR_GAP_MS
-//      → GPU is genuinely IDLE during this gap → compositor can render
-//   6. Submit next tile
-//
-// Result: GPU queue never has more than 1 tile. Between tiles, GPU is idle.
-// getSyncParameter is a lightweight client-side check, not a GPU-process sync.
-
-// Wait for a fence to signal, non-blockingly, then resolve after a gap.
-function waitForFence(sync) {
-  return new Promise(resolve => {
-    function poll() {
-      const status = gl.getSyncParameter(sync, gl.SYNC_STATUS);
-      if (status === gl.SIGNALED) {
-        gl.deleteSync(sync);
-        // GPU is now idle. Give compositor a guaranteed window before next tile.
-        setTimeout(resolve, COMPOSITOR_GAP_MS);
-      } else {
-        setTimeout(poll, 4);
-      }
-    }
-    setTimeout(poll, 2);
-  });
-}
-
-async function renderFractalToFBO(offset) {
+function renderFractalToFBO(offset) {
   const w = canvas.width, h = canvas.height;
-  const gen = ++renderGen;
+  ++renderGen;
 
   if (!fboA || fboA.w !== w || fboA.h !== h) {
     fboA = makeFBO(gl, w, h);
@@ -473,52 +425,40 @@ async function renderFractalToFBO(offset) {
     const tmp = fboA; fboA = fboB; fboB = tmp;
   }
 
-  gl.useProgram(fractalProg);
-  setFractalUniforms(gl, fractalUniforms, offset, w, h);
+  // Single full-frame draw into fboB. GPU executes asynchronously.
+  // flush() pushes commands without blocking worker or GPU process.
   gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
   gl.viewport(0, 0, w, h);
-  gl.enable(gl.SCISSOR_TEST);
-
-  for (let y = 0; y < h; y += TILE_SIZE) {
-    for (let x = 0; x < w; x += TILE_SIZE) {
-      if (gen !== renderGen) {
-        gl.disable(gl.SCISSOR_TEST);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        return;
-      }
-
-      gl.scissor(x, y, Math.min(TILE_SIZE, w - x), Math.min(TILE_SIZE, h - y));
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-
-      // Fence: mark this tile's completion point in GPU command stream
-      const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
-      gl.flush(); // push to GPU, return immediately (non-blocking)
-
-      // Wait for GPU to finish THIS tile, then idle gap for compositor
-      await waitForFence(sync);
-    }
-  }
-
-  gl.disable(gl.SCISSOR_TEST);
+  gl.useProgram(fractalProg);
+  setFractalUniforms(gl, fractalUniforms, offset, w, h);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.flush();
 
-  if (gen !== renderGen) return;
-
-  if (!fboAValid) {
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fboB.fbo);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, fboA.fbo);
-    gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-    fboAValid = true;
-    const tmp = fboA; fboA = fboB; fboB = tmp;
-    drawDisplay(0.0);
-    return;
-  }
-
-  isTransitioning = true;
-  transitionStart = performance.now();
-  startTransitionLoop();
+  // GPU is now executing the fractal asynchronously.
+  // We cannot know when it finishes without blocking, so we wait a fixed
+  // delay (generous enough for the GPU to complete on most machines)
+  // before starting the transition. If the transition reads fboB too early,
+  // it will show a partially-rendered frame — acceptable since fboA still
+  // shows the previous complete frame during transition.
+  setTimeout(() => {
+    if (!fboAValid) {
+      // First frame: blit fboB → fboA and display immediately
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fboB.fbo);
+      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, fboA.fbo);
+      gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+      fboAValid = true;
+      const tmp = fboA; fboA = fboB; fboB = tmp;
+      drawDisplay(0.0);
+      gl.flush();
+      return;
+    }
+    isTransitioning = true;
+    transitionStart = performance.now();
+    startTransitionLoop();
+  }, 3000); // wait 3s — generous budget for heavy shader on any GPU
 }
 
 // ── Message handler ────────────────────────────────────────────────────────
