@@ -378,13 +378,6 @@ const FractalBG = (() => {
 
       hud.init(canvas);
 
-      // debug replay button
-      const btn = document.createElement('button');
-      btn.textContent = 'Replay Intro';
-      btn.style.cssText = 'position:absolute;top:12px;right:12px;z-index:10;padding:6px 14px;font-size:12px;background:rgba(0,0,0,.55);color:#fff;border:1px solid rgba(255,255,255,.25);border-radius:6px;cursor:pointer;backdrop-filter:blur(6px)';
-      btn.addEventListener('click', () => this.replayIntro());
-      canvas.parentElement.appendChild(btn);
-
       // 移动端 / 触屏设备：跳过 Worker，直接主线程渲染
       // Worker + OffscreenCanvas WebGL2 在移动端即使初始化成功，实际渲染也可能静默失败
       const isMobile = navigator.maxTouchPoints > 1;
