@@ -33,6 +33,7 @@ function drawDisplay(t) {
   gl.bindTexture(gl.TEXTURE_2D, fboB.tex);
   gl.uniform1i(displayUniforms.u_texB, 1);
   gl.uniform1f(displayUniforms.u_transition, t);
+  gl.uniform1f(displayUniforms.u_intro, 0.0);
   gl.uniform2f(displayUniforms.u_resolution, canvas.width, canvas.height);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 }
@@ -159,8 +160,27 @@ function renderFractalToFBO() {
       gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
       fboAValid = true;
       const tmp = fboA; fboA = fboB; fboB = tmp;
-      drawDisplay(0.0);
-      gl.flush();
+      // intro unsort animation: sorted → normal
+      const introStart = performance.now();
+      function introTick() {
+        const p = Math.min((performance.now() - introStart) / TRANSITION_MS, 1.0);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        gl.useProgram(displayProg);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, fboA.tex);
+        gl.uniform1i(displayUniforms.u_texA, 0);
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, fboB.tex);
+        gl.uniform1i(displayUniforms.u_texB, 1);
+        gl.uniform1f(displayUniforms.u_transition, 0.0);
+        gl.uniform1f(displayUniforms.u_intro, 1.0 - p);
+        gl.uniform2f(displayUniforms.u_resolution, canvas.width, canvas.height);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        gl.flush();
+        if (p < 1.0) setTimeout(introTick, 16);
+      }
+      setTimeout(introTick, 16);
       self.postMessage({ type: 'renderDone' });
     } else {
       isTransitioning = true;
@@ -207,6 +227,7 @@ self.addEventListener('message', (e) => {
       u_texA:       gl.getUniformLocation(displayProg, 'u_texA'),
       u_texB:       gl.getUniformLocation(displayProg, 'u_texB'),
       u_transition: gl.getUniformLocation(displayProg, 'u_transition'),
+      u_intro:      gl.getUniformLocation(displayProg, 'u_intro'),
       u_resolution: gl.getUniformLocation(displayProg, 'u_resolution'),
     };
 
