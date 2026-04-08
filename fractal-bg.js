@@ -264,10 +264,11 @@ const FractalBG = (() => {
       u_texA:       gl.getUniformLocation(displayProg, 'u_texA'),
       u_texB:       gl.getUniformLocation(displayProg, 'u_texB'),
       u_transition: gl.getUniformLocation(displayProg, 'u_transition'),
+      u_intro:      gl.getUniformLocation(displayProg, 'u_intro'),
       u_resolution: gl.getUniformLocation(displayProg, 'u_resolution'),
     };
 
-    function drawDisplay(t) {
+    function drawDisplay(t, intro) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, canvas.width, canvas.height);
       gl.useProgram(displayProg);
@@ -278,6 +279,7 @@ const FractalBG = (() => {
       gl.bindTexture(gl.TEXTURE_2D, fboB.tex);
       gl.uniform1i(displayUniforms.u_texB, 1);
       gl.uniform1f(displayUniforms.u_transition, t);
+      gl.uniform1f(displayUniforms.u_intro, intro || 0.0);
       gl.uniform2f(displayUniforms.u_resolution, canvas.width, canvas.height);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
@@ -312,7 +314,14 @@ const FractalBG = (() => {
         gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
         fboAValid = true;
         const tmp = fboA; fboA = fboB; fboB = tmp;
-        drawDisplay(0.0);
+        // intro unsort animation: sorted → normal
+        const introStart = performance.now();
+        function introTick() {
+          const p = Math.min((performance.now() - introStart) / TRANSITION_MS, 1.0);
+          drawDisplay(0.0, 1.0 - p);
+          if (p < 1.0) requestAnimationFrame(introTick);
+        }
+        requestAnimationFrame(introTick);
       } else {
         isTransitioning = true;
         transitionStart = performance.now();

@@ -275,6 +275,7 @@ out vec4 fragColor;
 uniform sampler2D u_texA;
 uniform sampler2D u_texB;
 uniform float     u_transition;
+uniform float     u_intro;
 uniform vec2      u_resolution;
 
 float hash1(float n) {
@@ -283,15 +284,28 @@ float hash1(float n) {
 
 void main() {
   vec2 uv = vUv;
-  if (u_transition <= 0.0) { fragColor = texture(u_texA, uv); return; }
-  if (u_transition >= 1.0) { fragColor = texture(u_texB, uv); return; }
 
   float colId    = floor(gl_FragCoord.x / 3.0);
   float colRand  = hash1(colId);
+  float sortDir  = (colRand > 0.5) ? 1.0 : -1.0;
+
+  // ── intro unsort: single image from sorted → normal ──
+  if (u_intro > 0.0) {
+    float colDelay = colRand * 0.38;
+    float colT     = clamp((u_intro - colDelay) / (1.0 - colDelay), 0.0, 1.0);
+    float lumaA    = dot(texture(u_texA, uv).rgb, vec3(0.2126, 0.7152, 0.0722));
+    float shift    = (lumaA - 0.45) * sortDir * colT * 0.52;
+    vec2  sUV      = vec2(uv.x, clamp(uv.y + shift, 0.001, 0.999));
+    fragColor = texture(u_texA, sUV);
+    return;
+  }
+
+  // ── normal transition ──
+  if (u_transition <= 0.0) { fragColor = texture(u_texA, uv); return; }
+  if (u_transition >= 1.0) { fragColor = texture(u_texB, uv); return; }
+
   float colDelay = colRand * 0.38;
   float colT     = clamp((u_transition - colDelay) / (1.0 - colDelay), 0.0, 1.0);
-
-  float sortDir  = (colRand > 0.5) ? 1.0 : -1.0;
   float envelope = sin(colT * 3.14159);
 
   float lumaA    = dot(texture(u_texA, uv).rgb, vec3(0.2126, 0.7152, 0.0722));
