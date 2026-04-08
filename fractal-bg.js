@@ -5,7 +5,6 @@
 const FractalBG = (() => {
 
   let worker = null;
-  let _replayIntro = null;
 
   function getDrawSize(scale) {
     const dpr = (window.devicePixelRatio || 1) * (scale || 1);
@@ -285,16 +284,6 @@ const FractalBG = (() => {
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
 
-    function playIntroAnim() {
-      const introStart = performance.now();
-      function introTick() {
-        const p = Math.min((performance.now() - introStart) / TRANSITION_MS, 1.0);
-        drawDisplay(0.0, 1.0 - p);
-        if (p < 1.0) requestAnimationFrame(introTick);
-      }
-      requestAnimationFrame(introTick);
-    }
-
     function renderFractal() {
       const w = canvas.width, h = canvas.height;
 
@@ -325,7 +314,14 @@ const FractalBG = (() => {
         gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
         fboAValid = true;
         const tmp = fboA; fboA = fboB; fboB = tmp;
-        playIntroAnim();
+        // intro unsort animation: sorted → normal
+        const introStart = performance.now();
+        function introTick() {
+          const p = Math.min((performance.now() - introStart) / TRANSITION_MS, 1.0);
+          drawDisplay(0.0, 1.0 - p);
+          if (p < 1.0) requestAnimationFrame(introTick);
+        }
+        requestAnimationFrame(introTick);
       } else {
         isTransitioning = true;
         transitionStart = performance.now();
@@ -361,7 +357,6 @@ const FractalBG = (() => {
       }),
     );
 
-    _replayIntro = playIntroAnim;
     return true;
   }
 
@@ -394,11 +389,6 @@ const FractalBG = (() => {
       if (isMobile) console.info('FractalBG: mobile detected, using main-thread rendering');
       else console.info('FractalBG: using main-thread WebGL2 fallback');
       return initMainThreadPath(canvas);
-    },
-
-    replayIntro() {
-      if (worker) worker.postMessage({ type: 'replayIntro' });
-      else if (_replayIntro) _replayIntro();
     },
 
     stop() {
