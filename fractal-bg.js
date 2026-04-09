@@ -134,8 +134,9 @@ const FractalBG = (() => {
   // PATH A — OffscreenCanvas + Worker (desktop / modern browsers)
   // ================================================================
   function initWorkerPath(canvas) {
+    const RES_SCALE = 1.0; // 桌面端渲染分辨率乘数，调小可降低 GPU 负载
     const offscreen = canvas.transferControlToOffscreen();
-    const [w, h] = getDrawSize();
+    const [w, h] = getDrawSize(RES_SCALE);
 
     canvas.style.width  = window.innerWidth  + 'px';
     canvas.style.height = window.innerHeight + 'px';
@@ -166,7 +167,7 @@ const FractalBG = (() => {
           eventsWired = true;
           wireEvents(canvas,
             () => {
-              const [nw, nh] = getDrawSize();
+              const [nw, nh] = getDrawSize(RES_SCALE);
               canvas.style.width  = window.innerWidth  + 'px';
               canvas.style.height = window.innerHeight + 'px';
               worker.postMessage({ type: 'resize', w: nw, h: nh });
@@ -215,7 +216,8 @@ const FractalBG = (() => {
     // 移动端大幅降低渲染分辨率，配合 LITE 着色器避免 GPU 超时
     const RES_SCALE = 0.35;
     const MOUSE_STRENGTH = 0.285;
-    const TRANSITION_MS  = 1800;
+    const INTRO_MS       = 1800;
+    const TRANSITION_MS  = 3600;
 
     let gl, fractalProg, displayProg;
     let fractalUniforms = {}, displayUniforms = {};
@@ -225,6 +227,34 @@ const FractalBG = (() => {
     let isTransitioning = false;
     let transitionStart = 0;
     let transitionRAF = null;
+    let dispTexA = null, dispTexB = null;
+
+    const SORT_THRESH_LO = 8;
+    const SORT_THRESH_HI = 250;
+
+    function uploadDispTex(tex, dispData, w, h) {
+      if (!tex) {
+        tex = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      } else {
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+      }
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, w, h, 0, gl.RED, gl.FLOAT, dispData);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      return tex;
+    }
+
+    function buildDispFromFBO(fbo, w, h) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo.fbo);
+      const pixels = new Uint8Array(w * h * 4);
+      gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      return FC.pixelSortBuildDisp(pixels, w, h, SORT_THRESH_LO, SORT_THRESH_HI);
+    }
 
     function applySize() {
       const [w, h] = getDrawSize(RES_SCALE);
@@ -263,6 +293,8 @@ const FractalBG = (() => {
     displayUniforms = {
       u_texA:       gl.getUniformLocation(displayProg, 'u_texA'),
       u_texB:       gl.getUniformLocation(displayProg, 'u_texB'),
+      u_dispA:      gl.getUniformLocation(displayProg, 'u_dispA'),
+      u_dispB:      gl.getUniformLocation(displayProg, 'u_dispB'),
       u_transition: gl.getUniformLocation(displayProg, 'u_transition'),
       u_intro:      gl.getUniformLocation(displayProg, 'u_intro'),
       u_resolution: gl.getUniformLocation(displayProg, 'u_resolution'),
@@ -278,6 +310,12 @@ const FractalBG = (() => {
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, fboB.tex);
       gl.uniform1i(displayUniforms.u_texB, 1);
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, dispTexA);
+      gl.uniform1i(displayUniforms.u_dispA, 2);
+      gl.activeTexture(gl.TEXTURE3);
+      gl.bindTexture(gl.TEXTURE_2D, dispTexB);
+      gl.uniform1i(displayUniforms.u_dispB, 3);
       gl.uniform1f(displayUniforms.u_transition, t);
       gl.uniform1f(displayUniforms.u_intro, intro || 0.0);
       gl.uniform2f(displayUniforms.u_resolution, canvas.width, canvas.height);
@@ -297,6 +335,7 @@ const FractalBG = (() => {
         isTransitioning = false;
         if (transitionRAF) { cancelAnimationFrame(transitionRAF); transitionRAF = null; }
         const tmp = fboA; fboA = fboB; fboB = tmp;
+        const dtmp = dispTexA; dispTexA = dispTexB; dispTexB = dtmp;
       }
 
       gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
@@ -314,15 +353,22 @@ const FractalBG = (() => {
         gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
         fboAValid = true;
         const tmp = fboA; fboA = fboB; fboB = tmp;
+        // create displacement map for intro
+        const dispA = buildDispFromFBO(fboA, w, h);
+        dispTexA = uploadDispTex(dispTexA, dispA, w, h);
+        if (!dispTexB) dispTexB = uploadDispTex(dispTexB, dispA, w, h);
         // intro unsort animation: sorted → normal
         const introStart = performance.now();
         function introTick() {
-          const p = Math.min((performance.now() - introStart) / TRANSITION_MS, 1.0);
+          const p = Math.min((performance.now() - introStart) / INTRO_MS, 1.0);
           drawDisplay(0.0, 1.0 - p);
           if (p < 1.0) requestAnimationFrame(introTick);
         }
         requestAnimationFrame(introTick);
       } else {
+        // create displacement map for transition target
+        const dispB = buildDispFromFBO(fboB, w, h);
+        dispTexB = uploadDispTex(dispTexB, dispB, w, h);
         isTransitioning = true;
         transitionStart = performance.now();
         function tick() {
@@ -333,6 +379,7 @@ const FractalBG = (() => {
             isTransitioning = false;
             transitionRAF = null;
             const tmp = fboA; fboA = fboB; fboB = tmp;
+            const dtmp = dispTexA; dispTexA = dispTexB; dispTexB = dtmp;
           } else {
             transitionRAF = requestAnimationFrame(tick);
           }

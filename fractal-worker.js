@@ -17,12 +17,41 @@ let canvas = null;
 let renderGen = 0;
 
 const MOUSE_STRENGTH = 0.285;
-const TRANSITION_MS  = 1800;
+const INTRO_MS       = 3600;
+const TRANSITION_MS  = 7200;
+const SORT_THRESH_LO = 8;
+const SORT_THRESH_HI = 250;
 
 let currentOffset = [0, 0];
+let dispTexA = null, dispTexB = null;
+
+// ── Displacement texture helpers ─────────────────────────────────────────
+function uploadDispTex(tex, dispData, w, h) {
+  if (!tex) {
+    tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  } else {
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+  }
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, w, h, 0, gl.RED, gl.FLOAT, dispData);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  return tex;
+}
+
+function buildDispFromFBO(fbo, w, h) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo.fbo);
+  const pixels = new Uint8Array(w * h * 4);
+  gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return FC.pixelSortBuildDisp(pixels, w, h, SORT_THRESH_LO, SORT_THRESH_HI);
+}
 
 // ── Display (transition) rendering ────────────────────────────────────────
-function drawDisplay(t) {
+function drawDisplay(t, intro) {
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.viewport(0, 0, canvas.width, canvas.height);
   gl.useProgram(displayProg);
@@ -32,8 +61,14 @@ function drawDisplay(t) {
   gl.activeTexture(gl.TEXTURE1);
   gl.bindTexture(gl.TEXTURE_2D, fboB.tex);
   gl.uniform1i(displayUniforms.u_texB, 1);
+  gl.activeTexture(gl.TEXTURE2);
+  gl.bindTexture(gl.TEXTURE_2D, dispTexA);
+  gl.uniform1i(displayUniforms.u_dispA, 2);
+  gl.activeTexture(gl.TEXTURE3);
+  gl.bindTexture(gl.TEXTURE_2D, dispTexB);
+  gl.uniform1i(displayUniforms.u_dispB, 3);
   gl.uniform1f(displayUniforms.u_transition, t);
-  gl.uniform1f(displayUniforms.u_intro, 0.0);
+  gl.uniform1f(displayUniforms.u_intro, intro || 0.0);
   gl.uniform2f(displayUniforms.u_resolution, canvas.width, canvas.height);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 }
@@ -49,6 +84,7 @@ function startTransitionLoop() {
       isTransitioning = false;
       transitionTimer = null;
       const tmp = fboA; fboA = fboB; fboB = tmp;
+      const dtmp = dispTexA; dispTexA = dispTexB; dispTexB = dtmp;
     } else {
       transitionTimer = setTimeout(tick, 16);
     }
@@ -85,6 +121,7 @@ function renderFractalToFBO() {
     clearTimeout(transitionTimer);
     transitionTimer = null;
     const tmp = fboA; fboA = fboB; fboB = tmp;
+    const dtmp = dispTexA; dispTexA = dispTexB; dispTexB = dtmp;
   }
 
   const tileW = Math.ceil(w / TILE_COLS);
@@ -160,29 +197,24 @@ function renderFractalToFBO() {
       gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
       fboAValid = true;
       const tmp = fboA; fboA = fboB; fboB = tmp;
+      // create displacement map for intro
+      const dispA = buildDispFromFBO(fboA, w, h);
+      dispTexA = uploadDispTex(dispTexA, dispA, w, h);
+      if (!dispTexB) dispTexB = uploadDispTex(dispTexB, dispA, w, h);
       // intro unsort animation: sorted → normal
       const introStart = performance.now();
       function introTick() {
-        const p = Math.min((performance.now() - introStart) / TRANSITION_MS, 1.0);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        gl.viewport(0, 0, canvas.width, canvas.height);
-        gl.useProgram(displayProg);
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, fboA.tex);
-        gl.uniform1i(displayUniforms.u_texA, 0);
-        gl.activeTexture(gl.TEXTURE1);
-        gl.bindTexture(gl.TEXTURE_2D, fboB.tex);
-        gl.uniform1i(displayUniforms.u_texB, 1);
-        gl.uniform1f(displayUniforms.u_transition, 0.0);
-        gl.uniform1f(displayUniforms.u_intro, 1.0 - p);
-        gl.uniform2f(displayUniforms.u_resolution, canvas.width, canvas.height);
-        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        const p = Math.min((performance.now() - introStart) / INTRO_MS, 1.0);
+        drawDisplay(0.0, 1.0 - p);
         gl.flush();
         if (p < 1.0) setTimeout(introTick, 16);
       }
       setTimeout(introTick, 16);
       self.postMessage({ type: 'renderDone' });
     } else {
+      // create displacement map for transition target
+      const dispB = buildDispFromFBO(fboB, w, h);
+      dispTexB = uploadDispTex(dispTexB, dispB, w, h);
       isTransitioning = true;
       transitionStart = performance.now();
       startTransitionLoop();
@@ -226,6 +258,8 @@ self.addEventListener('message', (e) => {
     displayUniforms = {
       u_texA:       gl.getUniformLocation(displayProg, 'u_texA'),
       u_texB:       gl.getUniformLocation(displayProg, 'u_texB'),
+      u_dispA:      gl.getUniformLocation(displayProg, 'u_dispA'),
+      u_dispB:      gl.getUniformLocation(displayProg, 'u_dispB'),
       u_transition: gl.getUniformLocation(displayProg, 'u_transition'),
       u_intro:      gl.getUniformLocation(displayProg, 'u_intro'),
       u_resolution: gl.getUniformLocation(displayProg, 'u_resolution'),

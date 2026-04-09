@@ -274,6 +274,8 @@ out vec4 fragColor;
 
 uniform sampler2D u_texA;
 uniform sampler2D u_texB;
+uniform sampler2D u_dispA;
+uniform sampler2D u_dispB;
 uniform float     u_transition;
 uniform float     u_intro;
 uniform vec2      u_resolution;
@@ -287,40 +289,94 @@ void main() {
 
   float colId    = floor(gl_FragCoord.x / 3.0);
   float colRand  = hash1(colId);
-  float sortDir  = (colRand > 0.5) ? 1.0 : -1.0;
 
-  // ── intro unsort: single image from sorted → normal ──
+  // ── intro unsort: sorted → normal ──
   if (u_intro > 0.0) {
     float colDelay = colRand * 0.38;
     float colT     = clamp((u_intro - colDelay) / (1.0 - colDelay), 0.0, 1.0);
-    float lumaA    = dot(texture(u_texA, uv).rgb, vec3(0.2126, 0.7152, 0.0722));
-    float shift    = (lumaA - 0.45) * sortDir * colT * 0.52;
-    vec2  sUV      = vec2(uv.x, clamp(uv.y + shift, 0.001, 0.999));
-    fragColor = texture(u_texA, sUV);
+    float d        = texture(u_dispA, uv).r;
+    float srcY     = uv.y + d * colT / u_resolution.y;
+    fragColor = texture(u_texA, vec2(uv.x, clamp(srcY, 0.001, 0.999)));
     return;
   }
 
-  // ── normal transition ──
+  // ── 3-phase transition: sort → cross-sort → unsort ──
   if (u_transition <= 0.0) { fragColor = texture(u_texA, uv); return; }
   if (u_transition >= 1.0) { fragColor = texture(u_texB, uv); return; }
 
   float colDelay = colRand * 0.38;
   float colT     = clamp((u_transition - colDelay) / (1.0 - colDelay), 0.0, 1.0);
-  float envelope = sin(colT * 3.14159);
 
-  float lumaA    = dot(texture(u_texA, uv).rgb, vec3(0.2126, 0.7152, 0.0722));
-  float shiftA   = (lumaA - 0.45) * sortDir * envelope * 0.52;
-  vec2  sortedUV_A = vec2(uv.x, clamp(uv.y + shiftA, 0.001, 0.999));
-  vec4  colA_sort  = texture(u_texA, sortedUV_A);
+  const float P1 = 0.22;   // end of phase 1 (old normal → old sorted)
+  const float P2 = 0.45;   // end of phase 2 (old sorted → new sorted)
+  // phase 3 gets 55% of colT for smooth unsort
 
-  float lumaB    = dot(texture(u_texB, uv).rgb, vec3(0.2126, 0.7152, 0.0722));
-  float shiftB   = (lumaB - 0.45) * sortDir * envelope * 0.52;
-  vec2  sortedUV_B = vec2(uv.x, clamp(uv.y + shiftB, 0.001, 0.999));
-  vec4  colB_sort  = texture(u_texB, sortedUV_B);
+  float dA = texture(u_dispA, uv).r;
+  float dB = texture(u_dispB, uv).r;
 
-  float revealT = smoothstep(0.40, 0.60, colT);
-  fragColor = clamp(mix(colA_sort, colB_sort, revealT), 0.0, 1.0);
+  if (colT < P1) {
+    // Phase 1: old normal → old sorted
+    float p    = smoothstep(0.0, 1.0, colT / P1);
+    float srcY = uv.y + dA * p / u_resolution.y;
+    fragColor  = texture(u_texA, vec2(uv.x, clamp(srcY, 0.001, 0.999)));
+
+  } else if (colT < P2) {
+    // Phase 2: old sorted → new sorted (cross-sort)
+    float p     = smoothstep(0.0, 1.0, (colT - P1) / (P2 - P1));
+    float srcYA = uv.y + dA * (1.0 - p) / u_resolution.y;
+    float srcYB = uv.y + dB * p / u_resolution.y;
+    vec4  cA    = texture(u_texA, vec2(uv.x, clamp(srcYA, 0.001, 0.999)));
+    vec4  cB    = texture(u_texB, vec2(uv.x, clamp(srcYB, 0.001, 0.999)));
+    fragColor   = mix(cA, cB, p);
+
+  } else {
+    // Phase 3: new sorted → new normal (mirrors intro cascade)
+    float t3       = 1.0 - (colT - P2) / (1.0 - P2);   // 1→0 like u_intro
+    float p3Delay  = colRand * 0.38;
+    float p3       = clamp((t3 - p3Delay) / (1.0 - p3Delay), 0.0, 1.0);
+    float srcY     = uv.y + dB * p3 / u_resolution.y;
+    fragColor      = texture(u_texB, vec2(uv.x, clamp(srcY, 0.001, 0.999)));
+  }
 }`;
+
+// ── CPU Pixel Sort Displacement Map (vertical, by brightness) ───────────
+// For each pixel, computes how many rows it needs to move to reach its sorted position.
+// Returns Float32Array(w*h): disp[y*w+x] = origY - sortedY for column x.
+// Shader samples original at (x, y + disp * progress) to animate sorting.
+function pixelSortBuildDisp(pixels, width, height, threshLow, threshHigh) {
+  const disp = new Float32Array(width * height);
+
+  for (let x = 0; x < width; x++) {
+    const vals = new Float32Array(height);
+    for (let y = 0; y < height; y++) {
+      const i = (y * width + x) * 4;
+      vals[y] = 0.299 * pixels[i] + 0.587 * pixels[i + 1] + 0.114 * pixels[i + 2];
+    }
+
+    let start = -1;
+    for (let y = 0; y <= height; y++) {
+      const inRange = y < height && vals[y] >= threshLow && vals[y] <= threshHigh;
+      if (inRange) {
+        if (start < 0) start = y;
+      } else if (start >= 0) {
+        const len = y - start;
+        if (len > 1) {
+          const indices = [];
+          for (let j = 0; j < len; j++) {
+            indices.push({ origY: start + j, val: vals[start + j] });
+          }
+          indices.sort((a, b) => a.val - b.val);
+          for (let j = 0; j < len; j++) {
+            const sortedY = start + j;
+            disp[sortedY * width + x] = indices[j].origY - sortedY;
+          }
+        }
+        start = -1;
+      }
+    }
+  }
+  return disp;
+}
 
 // ── GL helpers ────────────────────────────────────────────────────────────
 
@@ -423,6 +479,7 @@ return {
   makeFBO,
   cacheFractalUniforms,
   setFractalUniforms,
+  pixelSortBuildDisp,
 };
 
 })();
