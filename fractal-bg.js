@@ -42,43 +42,50 @@ const FractalBG = (() => {
     xEl:       null,
     yEl:       null,
     hint:      null,
-    computing: null,
+    overlay:   null,
 
-    init(canvas) {
+    init() {
       this.el        = document.getElementById('fractalHUD');
-      this.coords    = document.getElementById('fractalCoords');
       this.xEl       = document.getElementById('fractalX');
       this.yEl       = document.getElementById('fractalY');
       this.hint      = document.getElementById('fractalHint');
-      this.computing = document.getElementById('fractalComputing');
-
-      if (this.el && typeof IntersectionObserver !== 'undefined') {
-        new IntersectionObserver(([entry]) => {
-          this.el.style.display = entry.isIntersecting ? '' : 'none';
-        }, { threshold: 0 }).observe(canvas);
-      }
+      this.overlay   = document.getElementById('fractalLoadingOverlay');
     },
 
-    showCoords(nx, ny) {
-      if (!this.coords) return;
+    showCoords(nx, ny, clientX, clientY, canvasRect) {
+      if (!this.el) return;
       this.xEl.textContent = 'x: ' + nx.toFixed(3);
       this.yEl.textContent = 'y: ' + ny.toFixed(3);
-      this.coords.style.opacity = '1';
+      this.el.style.left = (clientX - canvasRect.left) + 'px';
+      this.el.style.top  = (clientY - canvasRect.top)  + 'px';
+      this.el.classList.add('visible');
     },
 
     hideCoords() {
-      if (this.coords) this.coords.style.opacity = '0';
+      if (this.el) this.el.classList.remove('visible');
+    },
+
+    startLoading() {
+      if (!this.overlay) return;
+      this.overlay.innerHTML =
+        '<div class="pm-scene"><div class="pm-monster"></div>' +
+        '<div class="pm-dots"><i></i><i></i><i></i><i></i></div></div>';
+      this.overlay.classList.add('active');
+      if (this.hint) this.hint.style.opacity = '0';
+    },
+
+    stopLoading() {
+      if (!this.overlay) return;
+      this.overlay.classList.remove('active');
+      setTimeout(() => {
+        if (!this.overlay.classList.contains('active')) this.overlay.innerHTML = '';
+      }, 350);
+      if (this.hint) this.hint.style.opacity = '1';
     },
 
     setComputing(active) {
-      if (!this.computing || !this.hint) return;
-      if (active) {
-        this.hint.style.opacity = '0';
-        this.computing.style.display = 'flex';
-      } else {
-        this.hint.style.opacity = '1';
-        this.computing.style.display = 'none';
-      }
+      if (active) return;
+      this.stopLoading();
     },
   };
 
@@ -91,7 +98,7 @@ const FractalBG = (() => {
       const rect = canvas.getBoundingClientRect();
       const nx = (e.clientX - rect.left) / rect.width;
       const ny = (e.clientY - rect.top)  / rect.height;
-      hud.showCoords(nx, ny);
+      hud.showCoords(nx, ny, e.clientX, e.clientY, rect);
     });
     heroSection.addEventListener('mouseleave', () => hud.hideCoords());
 
@@ -100,7 +107,7 @@ const FractalBG = (() => {
       const rect = canvas.getBoundingClientRect();
       const nx = (touch.clientX - rect.left) / rect.width;
       const ny = (touch.clientY - rect.top)  / rect.height;
-      hud.showCoords(nx, ny);
+      hud.showCoords(nx, ny, touch.clientX, touch.clientY, rect);
     }, { passive: true });
     heroSection.addEventListener('touchend', () => hud.hideCoords());
 
@@ -112,7 +119,7 @@ const FractalBG = (() => {
       const rect = canvas.getBoundingClientRect();
       const x = e.clientX, y = e.clientY;
       if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return;
-      hud.setComputing(true);
+      hud.startLoading();
       onClickAction(
         (x - rect.left) / rect.width,
         (y - rect.top)  / rect.height,
@@ -203,7 +210,7 @@ const FractalBG = (() => {
     console.info('FractalBG: using main-thread WebGL2 fallback');
     // canvas 的控制权已转移给 Worker，需要创建新 canvas
     const newCanvas = replaceCanvas(oldCanvas);
-    hud.init(newCanvas);
+    hud.init();
     initMainThreadPath(newCanvas);
   }
 
@@ -418,7 +425,7 @@ const FractalBG = (() => {
         return false;
       }
 
-      hud.init(canvas);
+      hud.init();
 
       // 移动端 / 触屏设备：跳过 Worker，直接主线程渲染
       // Worker + OffscreenCanvas WebGL2 在移动端即使初始化成功，实际渲染也可能静默失败

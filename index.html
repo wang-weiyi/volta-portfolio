@@ -9,15 +9,18 @@
 /* 分形 canvas 全屏背景 */
 #fractalCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:0;display:block}
 .hero-overlay{display:none}
-/* 分形 HUD */
-.fractal-hud{position:fixed;top:72px;right:2rem;z-index:10;display:flex;flex-direction:column;align-items:flex-end;gap:6px;pointer-events:none;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-.fractal-hud-coords{font-size:13px;color:rgba(237,233,222,.92);padding:0;letter-spacing:.05em;display:flex;gap:14px;transition:opacity .2s}
-.fractal-hud-hint{font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:rgba(237,233,222,.55);transition:opacity .3s}
-.fractal-hud-computing{display:flex;align-items:center;gap:2px}
+/* 分形 HUD — 跟随鼠标 */
+.fractal-hud{position:absolute;z-index:10;pointer-events:none;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;display:flex;flex-direction:column;gap:4px;opacity:0;transition:opacity .2s;white-space:nowrap;padding-left:16px;padding-top:16px}
+.fractal-hud.visible{opacity:1}
+.fractal-hud-coords{font-size:12px;color:rgba(237,233,222,.85);letter-spacing:.05em;display:flex;gap:12px}
+.fractal-hud-hint{font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:rgba(237,233,222,.45)}
+/* 全屏分形加载遮罩 */
+.fractal-loading-overlay{position:absolute;inset:0;z-index:1;pointer-events:none;opacity:0;transition:opacity .3s;overflow:hidden;background:rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center}
+.fractal-loading-overlay.active{opacity:1}
 /* 像素小怪兽吃豆动画 */
-.pm-scene{display:flex;align-items:center;height:20px;gap:0;position:relative;width:80px;overflow:hidden}
+.pm-scene{display:flex;align-items:center;height:20px;position:relative;width:80px;overflow:hidden}
 .pm-monster{width:20px;height:20px;position:relative;animation:pm-move 1.8s linear infinite}
-.pm-monster::before{content:'';position:absolute;inset:0;background:rgba(200,255,0,.95);clip-path:polygon(0 0,100% 0,100% 100%,0 100%);animation:pm-chomp .25s ease-in-out infinite alternate}
+.pm-monster::before{content:'';position:absolute;inset:0;background:rgba(200,255,0,.95);animation:pm-chomp .25s ease-in-out infinite alternate}
 .pm-monster::after{content:'';position:absolute;top:3px;right:3px;width:4px;height:4px;background:#111;border-radius:50%}
 @keyframes pm-chomp{0%{clip-path:polygon(0 0,100% 35%,100% 65%,0 100%,0 50%)}100%{clip-path:polygon(0 0,100% 10%,100% 90%,0 100%,0 50%)}}
 @keyframes pm-move{0%{transform:translateX(0)}100%{transform:translateX(60px)}}
@@ -27,7 +30,7 @@
 .pm-dots i:nth-child(2){animation-delay:.45s}
 .pm-dots i:nth-child(3){animation-delay:.9s}
 .pm-dots i:nth-child(4){animation-delay:1.35s}
-@keyframes pm-eat{0%,70%{opacity:1;transform:scale(1)}71%{opacity:0;transform:scale(0)}100%{opacity:0;transform:scale(0)}}
+@keyframes pm-eat{0%,70%{opacity:1;transform:scale(1)}71%,100%{opacity:0;transform:scale(0)}}
 .hero-content{position:relative;z-index:2;max-width:1280px;margin:0 auto;width:100%}
 .hero-eyebrow{display:flex;align-items:center;gap:10px;margin-bottom:1.5rem;font-size:11px;font-weight:600;letter-spacing:.22em;text-transform:uppercase;color:var(--acc)}
 .hero-eyebrow::before{content:'';width:28px;height:1px;background:currentColor}
@@ -100,17 +103,12 @@
 <section class="hero">
   <canvas id="fractalCanvas"></canvas>
   <div class="fractal-hud" id="fractalHUD">
-    <div class="fractal-hud-coords" id="fractalCoords" style="opacity:0">
+    <div class="fractal-hud-coords">
       <span id="fractalX">x: 0.500</span><span id="fractalY">y: 0.500</span>
     </div>
     <div class="fractal-hud-hint" id="fractalHint">点击以更新分形</div>
-    <div class="fractal-hud-computing" id="fractalComputing" style="display:none">
-      <div class="pm-scene">
-        <div class="pm-monster"></div>
-        <div class="pm-dots"><i></i><i></i><i></i><i></i></div>
-      </div>
-    </div>
   </div>
+  <div class="fractal-loading-overlay" id="fractalLoadingOverlay"></div>
   <div class="hero-overlay"></div>
   <div class="hero-content">
     <div class="hero-eyebrow">3D 数字艺术家</div>
