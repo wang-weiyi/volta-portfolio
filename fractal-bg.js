@@ -14,6 +14,63 @@ const FractalBG = (() => {
     ];
   }
 
+  // ── 分形 FBO 原始像素缓存 (IndexedDB) ──────────────────────
+  const fractalCache = {
+    DB: 'FractalBGCache',
+    STORE: 'fbo',
+    KEY: 'initial',
+
+    _open() {
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open(this.DB, 2);
+        req.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          // 清理旧版 store
+          if (db.objectStoreNames.contains('images')) db.deleteObjectStore('images');
+          if (!db.objectStoreNames.contains(this.STORE)) db.createObjectStore(this.STORE);
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    },
+
+    /** 加载缓存的 FBO 像素 → { pixels: ArrayBuffer, w, h } | null */
+    async load() {
+      try {
+        const db = await this._open();
+        const data = await new Promise(resolve => {
+          const tx = db.transaction(this.STORE, 'readonly');
+          const req = tx.objectStore(this.STORE).get(this.KEY);
+          req.onsuccess = () => resolve(req.result || null);
+          req.onerror = () => resolve(null);
+        });
+        if (!data || !data.pixels) return null;
+        // 解压（如果需要）
+        if (data.compressed && typeof DecompressionStream !== 'undefined') {
+          const stream = new Blob([data.pixels]).stream().pipeThrough(new DecompressionStream('gzip'));
+          data.pixels = await new Response(stream).arrayBuffer();
+        }
+        return data;
+      } catch { return null; }
+    },
+
+    /** 保存 FBO 像素 { pixels: ArrayBuffer, w, h } */
+    async save(data) {
+      try {
+        const db = await this._open();
+        let stored = { pixels: data.pixels, w: data.w, h: data.h, compressed: false };
+        // 尝试 gzip 压缩（33MB → ~5MB）
+        if (typeof CompressionStream !== 'undefined') {
+          const stream = new Blob([data.pixels]).stream().pipeThrough(new CompressionStream('gzip'));
+          stored.pixels = await new Response(stream).arrayBuffer();
+          stored.compressed = true;
+        }
+        const tx = db.transaction(this.STORE, 'readwrite');
+        tx.objectStore(this.STORE).put(stored, this.KEY);
+      } catch (e) { console.warn('FractalCache: save failed', e); }
+    },
+  };
+
   // 在主线程测试 OffscreenCanvas + WebGL2 是否真正可用
   function canWorkerRender() {
     try {
@@ -140,8 +197,8 @@ const FractalBG = (() => {
   // ================================================================
   // PATH A — OffscreenCanvas + Worker (desktop / modern browsers)
   // ================================================================
-  function initWorkerPath(canvas) {
-    const RES_SCALE = 1.0; // 桌面端渲染分辨率乘数，调小可降低 GPU 负载
+  function initWorkerPath(canvas, cachedFBO) {
+    const RES_SCALE = 1.0;
     const offscreen = canvas.transferControlToOffscreen();
     const [w, h] = getDrawSize(RES_SCALE);
 
@@ -154,13 +211,12 @@ const FractalBG = (() => {
     let initResolved = false;
     let eventsWired = false;
 
-    // 超时：Worker 3 秒内没回报 → 降级
     const timeout = setTimeout(() => {
       if (!initResolved) {
         initResolved = true;
         console.warn('FractalBG: Worker init timeout, falling back to main thread');
         worker.terminate(); worker = null;
-        fallbackToMainThread(canvas);
+        fallbackToMainThread(canvas, cachedFBO);
       }
     }, 3000);
 
@@ -168,8 +224,16 @@ const FractalBG = (() => {
       if (e.data.type === 'initOK' && !initResolved) {
         initResolved = true;
         clearTimeout(timeout);
-        // Worker 初始化成功，触发首次渲染并绑定事件
-        worker.postMessage({ type: 'mouseenter' });
+        // 有缓存 → 上传像素到 FBO，跳过 GPU 分形计算
+        if (cachedFBO && cachedFBO.w === w && cachedFBO.h === h) {
+          worker.postMessage(
+            { type: 'loadCache', pixels: cachedFBO.pixels, w: cachedFBO.w, h: cachedFBO.h },
+            [cachedFBO.pixels],
+          );
+          cachedFBO = null;
+        } else {
+          worker.postMessage({ type: 'mouseenter' });
+        }
         if (!eventsWired) {
           eventsWired = true;
           wireEvents(canvas,
@@ -189,9 +253,11 @@ const FractalBG = (() => {
         clearTimeout(timeout);
         console.warn('FractalBG: Worker init failed:', e.data.reason, '— falling back');
         worker.terminate(); worker = null;
-        fallbackToMainThread(canvas);
+        fallbackToMainThread(canvas, cachedFBO);
       } else if (e.data.type === 'renderDone') {
         hud.setComputing(false);
+      } else if (e.data.type === 'cacheFBO') {
+        fractalCache.save({ pixels: e.data.pixels, w: e.data.w, h: e.data.h });
       }
     };
 
@@ -206,18 +272,17 @@ const FractalBG = (() => {
     };
   }
 
-  function fallbackToMainThread(oldCanvas) {
+  function fallbackToMainThread(oldCanvas, cachedFBO) {
     console.info('FractalBG: using main-thread WebGL2 fallback');
-    // canvas 的控制权已转移给 Worker，需要创建新 canvas
     const newCanvas = replaceCanvas(oldCanvas);
     hud.init();
-    initMainThreadPath(newCanvas);
+    initMainThreadPath(newCanvas, cachedFBO);
   }
 
   // ================================================================
   // PATH B — Main-thread WebGL2 fallback (mobile / old browsers)
   // ================================================================
-  function initMainThreadPath(canvas) {
+  function initMainThreadPath(canvas, cachedFBO) {
     const FC = FractalCore;
 
     // 移动端大幅降低渲染分辨率，配合 LITE 着色器避免 GPU 超时
@@ -329,6 +394,48 @@ const FractalBG = (() => {
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
 
+    /** 保存 FBO 像素到 IndexedDB */
+    function saveFBOCache() {
+      const w = canvas.width, h = canvas.height;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fboA.fbo);
+      const pixels = new Uint8Array(w * h * 4);
+      gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      fractalCache.save({ pixels: pixels.buffer, w, h });
+    }
+
+    /** 将缓存像素上传到 FBO texture（跳过 GPU 分形计算） */
+    function uploadCacheToFBO(data) {
+      const w = data.w, h = data.h;
+      if (!fboA || fboA.w !== w || fboA.h !== h) {
+        fboA = FC.makeFBO(gl, w, h);
+        fboB = FC.makeFBO(gl, w, h);
+      }
+      // 上传到 fboA
+      gl.bindTexture(gl.TEXTURE_2D, fboA.tex);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(data.pixels));
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      fboAValid = true;
+    }
+
+    /** 播放 intro 动画（通用，无论来源是缓存还是 GPU 计算） */
+    function playIntro(onDone) {
+      const dispA = buildDispFromFBO(fboA, canvas.width, canvas.height);
+      dispTexA = uploadDispTex(dispTexA, dispA, canvas.width, canvas.height);
+      if (!dispTexB) dispTexB = uploadDispTex(dispTexB, dispA, canvas.width, canvas.height);
+      const introStart = performance.now();
+      function introTick() {
+        const p = Math.min((performance.now() - introStart) / INTRO_MS, 1.0);
+        drawDisplay(0.0, 1.0 - p);
+        if (p < 1.0) {
+          requestAnimationFrame(introTick);
+        } else if (onDone) {
+          onDone();
+        }
+      }
+      requestAnimationFrame(introTick);
+    }
+
     function renderFractal() {
       const w = canvas.width, h = canvas.height;
 
@@ -360,20 +467,8 @@ const FractalBG = (() => {
         gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
         fboAValid = true;
         const tmp = fboA; fboA = fboB; fboB = tmp;
-        // create displacement map for intro
-        const dispA = buildDispFromFBO(fboA, w, h);
-        dispTexA = uploadDispTex(dispTexA, dispA, w, h);
-        if (!dispTexB) dispTexB = uploadDispTex(dispTexB, dispA, w, h);
-        // intro unsort animation: sorted → normal
-        const introStart = performance.now();
-        function introTick() {
-          const p = Math.min((performance.now() - introStart) / INTRO_MS, 1.0);
-          drawDisplay(0.0, 1.0 - p);
-          if (p < 1.0) requestAnimationFrame(introTick);
-        }
-        requestAnimationFrame(introTick);
+        playIntro(saveFBOCache);
       } else {
-        // create displacement map for transition target
         const dispB = buildDispFromFBO(fboB, w, h);
         dispTexB = uploadDispTex(dispTexB, dispB, w, h);
         isTransitioning = true;
@@ -397,7 +492,14 @@ const FractalBG = (() => {
       hud.setComputing(false);
     }
 
-    renderFractal();
+    // 有缓存 → 直接上传到 FBO，播放 intro，跳过 GPU 分形计算
+    if (cachedFBO && cachedFBO.w === canvas.width && cachedFBO.h === canvas.height) {
+      uploadCacheToFBO(cachedFBO);
+      playIntro(saveFBOCache);
+      cachedFBO = null;
+    } else {
+      renderFractal();
+    }
 
     wireEvents(canvas,
       () => {
@@ -418,7 +520,7 @@ const FractalBG = (() => {
   // Public API
   // ================================================================
   return {
-    init(targetId = 'fractalCanvas') {
+    async init(targetId = 'fractalCanvas') {
       const canvas = document.getElementById(targetId);
       if (!canvas) {
         console.warn('FractalBG: canvas not found, id =', targetId);
@@ -427,13 +529,15 @@ const FractalBG = (() => {
 
       hud.init();
 
-      // 移动端 / 触屏设备：跳过 Worker，直接主线程渲染
-      // Worker + OffscreenCanvas WebGL2 在移动端即使初始化成功，实际渲染也可能静默失败
+      // 尝试从 IndexedDB 加载缓存的 FBO 像素
+      const cachedFBO = await fractalCache.load();
+      if (cachedFBO) console.info('FractalBG: cached FBO found (%dx%d)', cachedFBO.w, cachedFBO.h);
+
       const isMobile = navigator.maxTouchPoints > 1;
 
       if (!isMobile && canvas.transferControlToOffscreen && canWorkerRender()) {
         try {
-          initWorkerPath(canvas);
+          initWorkerPath(canvas, cachedFBO);
           return true;
         } catch (err) {
           console.warn('FractalBG: Worker path threw:', err);
@@ -442,7 +546,7 @@ const FractalBG = (() => {
 
       if (isMobile) console.info('FractalBG: mobile detected, using main-thread rendering');
       else console.info('FractalBG: using main-thread WebGL2 fallback');
-      return initMainThreadPath(canvas);
+      return initMainThreadPath(canvas, cachedFBO);
     },
 
     stop() {

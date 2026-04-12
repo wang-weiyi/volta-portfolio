@@ -1,7 +1,7 @@
 // fractal-worker.js — runs entirely off the main thread via OffscreenCanvas
 // Shader sources & GL helpers are in fractal-core.js
 
-importScripts('fractal-core.js');
+importScripts('fractal-core.js?v=' + Date.now());
 
 const FC = FractalCore;
 
@@ -17,7 +17,7 @@ let canvas = null;
 let renderGen = 0;
 
 const MOUSE_STRENGTH = 0.285;
-const INTRO_MS       = 3600;
+const INTRO_MS       = 3600;   // sorted → normal (unsort)
 const TRANSITION_MS  = 7200;
 const SORT_THRESH_LO = 8;
 const SORT_THRESH_HI = 250;
@@ -197,17 +197,29 @@ function renderFractalToFBO() {
       gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
       fboAValid = true;
       const tmp = fboA; fboA = fboB; fboB = tmp;
-      // create displacement map for intro
       const dispA = buildDispFromFBO(fboA, w, h);
       dispTexA = uploadDispTex(dispTexA, dispA, w, h);
       if (!dispTexB) dispTexB = uploadDispTex(dispTexB, dispA, w, h);
-      // intro unsort animation: sorted → normal
+
+      function saveFBOToMain() {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fboA.fbo);
+        const pixels = new Uint8Array(w * h * 4);
+        gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        self.postMessage({ type: 'cacheFBO', pixels: pixels.buffer, w, h }, [pixels.buffer]);
+      }
+
+      // 播放入场动画（sorted → normal）
       const introStart = performance.now();
       function introTick() {
         const p = Math.min((performance.now() - introStart) / INTRO_MS, 1.0);
         drawDisplay(0.0, 1.0 - p);
         gl.flush();
-        if (p < 1.0) setTimeout(introTick, 16);
+        if (p < 1.0) {
+          setTimeout(introTick, 16);
+        } else {
+          saveFBOToMain();
+        }
       }
       setTimeout(introTick, 16);
       self.postMessage({ type: 'renderDone' });
@@ -277,6 +289,33 @@ self.addEventListener('message', (e) => {
 
   } else if (type === 'mouseenter') {
     if (!fboAValid) renderFractalToFBO();
+
+  } else if (type === 'loadCache') {
+    // 从主线程接收缓存像素，上传到 FBO，跳过 GPU 分形计算，直接播放 intro
+    const { pixels, w, h } = e.data;
+    if (!fboA || fboA.w !== w || fboA.h !== h) {
+      fboA = FC.makeFBO(gl, w, h);
+      fboB = FC.makeFBO(gl, w, h);
+    }
+    gl.bindTexture(gl.TEXTURE_2D, fboA.tex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(pixels));
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    fboAValid = true;
+
+    // 构建 displacement map + 播放 intro 动画
+    const dispA = buildDispFromFBO(fboA, w, h);
+    dispTexA = uploadDispTex(dispTexA, dispA, w, h);
+    if (!dispTexB) dispTexB = uploadDispTex(dispTexB, dispA, w, h);
+
+    const introStart = performance.now();
+    function introTick() {
+      const p = Math.min((performance.now() - introStart) / INTRO_MS, 1.0);
+      drawDisplay(0.0, 1.0 - p);
+      gl.flush();
+      if (p < 1.0) setTimeout(introTick, 16);
+    }
+    setTimeout(introTick, 16);
+    self.postMessage({ type: 'renderDone' });
 
   } else if (type === 'click') {
     currentOffset[0] = (e.data.nx - 0.5) * MOUSE_STRENGTH;

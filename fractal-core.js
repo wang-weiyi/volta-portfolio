@@ -283,6 +283,9 @@ uniform vec2      u_resolution;
 float hash1(float n) {
   return fract(sin(n * 127.1) * 43758.5453);
 }
+float hash2(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
 
 void main() {
   vec2 uv = vUv;
@@ -290,7 +293,45 @@ void main() {
   float colId    = floor(gl_FragCoord.x / 3.0);
   float colRand  = hash1(colId);
 
+  // ── intro fade-in: black → sorted (pixel leak from tears) ──
+  // u_intro > 1.0: fade phase, 2.0 = fully black, 1.0 = fully sorted
+  if (u_intro > 1.0) {
+    float t = 2.0 - u_intro;   // 0.0 → 1.0 as intro progresses
+
+    // sorted position sampling
+    float d    = texture(u_dispA, uv).r;
+    float srcY = uv.y + d / u_resolution.y;
+    vec4 sorted = texture(u_texA, vec2(uv.x, clamp(srcY, 0.001, 0.999)));
+
+    vec2 px = gl_FragCoord.xy / u_resolution;
+
+    // 4 vertical tear lines, evenly spaced + random offset + organic wiggle
+    float minDist = 1.0;
+    for (int i = 0; i < 4; i++) {
+      float fi = float(i);
+      float tearX = (fi + 0.5) / 4.0 + (hash1(fi * 17.3 + 3.7) - 0.5) * 0.12;
+      float wiggle = sin(px.y * (6.0 + fi * 3.5) + fi * 2.5) * 0.02
+                   + sin(px.y * (19.0 + fi * 5.0) + fi * 4.7) * 0.01;
+      float dx = abs(px.x - tearX + wiggle);
+      minDist = min(minDist, dx);
+    }
+
+    // fine pixel noise for ragged torn edges
+    float edgeNoise = (hash2(floor(gl_FragCoord.xy / 3.0)) - 0.5) * 0.022;
+    minDist = max(minDist + edgeNoise, 0.0);
+
+    // expand from tears: quadratic ease-in (slow crack → fast flood)
+    float expand = t * t * 0.26;
+    float appear = 1.0 - smoothstep(expand - 0.005, expand + 0.005, minDist);
+    // force full reveal in the last 10% for seamless transition to unsort
+    appear = mix(appear, 1.0, smoothstep(0.85, 0.92, t));
+
+    fragColor = vec4(sorted.rgb * appear, 1.0);
+    return;
+  }
+
   // ── intro unsort: sorted → normal ──
+  // u_intro 1.0 → 0.0: unsort phase
   if (u_intro > 0.0) {
     float colDelay = colRand * 0.38;
     float colT     = clamp((u_intro - colDelay) / (1.0 - colDelay), 0.0, 1.0);
