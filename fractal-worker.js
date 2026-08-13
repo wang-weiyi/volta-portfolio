@@ -6,9 +6,11 @@ importScripts('fractal-core.js?v=' + Date.now());
 const FC = FractalCore;
 
 // ── Worker state ───────────────────────────────────────────────────────────
-let gl, fractalProg, displayProg;
-let fractalUniforms = {}, displayUniforms = {};
+let gl, progressiveProg, accumulateProg, activeRayProg, resolveProg, displayProg;
+let progressiveUniforms = {}, accumulateUniforms = {}, activeRayUniforms = {}, resolveUniforms = {}, displayUniforms = {};
 let fboA = null, fboB = null;
+let stateA = null, stateB = null;
+let accumulationFBO = null;
 let fboAValid = false;
 let transitionStart = 0;
 let isTransitioning = false;
@@ -73,6 +75,34 @@ function drawDisplay(t, intro) {
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 }
 
+function drawResolved(currentState, includeCurrent, targetFBO) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, targetFBO || null);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.useProgram(resolveProg);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, accumulationFBO.tex);
+  gl.uniform1i(resolveUniforms.u_accum, 0);
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_2D, currentState.tex);
+  gl.uniform1i(resolveUniforms.u_currentState, 1);
+  gl.uniform1f(resolveUniforms.u_includeCurrent, includeCurrent ? 1.0 : 0.0);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+function accumulateSample(sampleState) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, accumulationFBO.fbo);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.useProgram(accumulateProg);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, sampleState.tex);
+  gl.uniform1i(accumulateUniforms.u_sampleState, 0);
+  gl.enable(gl.BLEND);
+  gl.blendEquation(gl.FUNC_ADD);
+  gl.blendFunc(gl.ONE, gl.ONE);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  gl.disable(gl.BLEND);
+}
+
 function startTransitionLoop() {
   if (transitionTimer !== null) return;
   function tick() {
@@ -92,23 +122,32 @@ function startTransitionLoop() {
   transitionTimer = setTimeout(tick, 16);
 }
 
-let tileRendering = false;
+let progressiveRendering = false;
 let pendingOffset = null;
 
-const TILE_COLS = 4;
-const TILE_ROWS = 4;
-const TILE_BREATHE_MS = 16;
+const AA_SAMPLES = 4;
+const STEPS_PER_SAMPLE = 512;
+const ACTIVE_CHECK_INTERVAL = 16;
+const SAMPLE_JITTERS = [
+  [-0.25, -0.25],
+  [ 0.25, -0.25],
+  [-0.25,  0.25],
+  [ 0.25,  0.25],
+];
 
 function renderFractalToFBO() {
   const w = canvas.width, h = canvas.height;
 
-  if (tileRendering) {
+  if (progressiveRendering) {
+    renderGen++;
     pendingOffset = [...currentOffset];
     return;
   }
 
-  ++renderGen;
-  tileRendering = true;
+  const myGen = ++renderGen;
+  const renderOffset = [...currentOffset];
+  const wasInitialRender = !fboAValid;
+  progressiveRendering = true;
 
   if (!fboA || fboA.w !== w || fboA.h !== h) {
     fboA = FC.makeFBO(gl, w, h);
@@ -116,121 +155,169 @@ function renderFractalToFBO() {
     fboAValid = false;
   }
 
+  if (!stateA || stateA.w !== w || stateA.h !== h) {
+    stateA = FC.makeStateFBO(gl, w, h);
+    stateB = FC.makeStateFBO(gl, w, h);
+    accumulationFBO = FC.makeAccumFBO(gl, w, h);
+    if (!stateA.complete || !stateB.complete || !accumulationFBO.complete) {
+      progressiveRendering = false;
+      self.postMessage({ type: 'initError', reason: 'Floating-point render targets are unavailable' });
+      return;
+    }
+  }
+
   if (isTransitioning) {
     isTransitioning = false;
     clearTimeout(transitionTimer);
     transitionTimer = null;
-    const tmp = fboA; fboA = fboB; fboB = tmp;
-    const dtmp = dispTexA; dispTexA = dispTexB; dispTexB = dtmp;
   }
 
-  const tileW = Math.ceil(w / TILE_COLS);
-  const tileH = Math.ceil(h / TILE_ROWS);
-  const tiles = [];
-  for (let ty = 0; ty < TILE_ROWS; ty++) {
-    for (let tx = 0; tx < TILE_COLS; tx++) {
-      tiles.push({
-        x: tx * tileW,
-        y: ty * tileH,
-        w: Math.min(tileW, w - tx * tileW),
-        h: Math.min(tileH, h - ty * tileH),
-      });
-    }
-  }
+  let readState = stateA;
+  let writeState = stateB;
+  let pass = 0;
+  let sampleIndex = 0;
 
-  gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, accumulationFBO.fbo);
   gl.viewport(0, 0, w, h);
-  gl.useProgram(fractalProg);
-  FC.setFractalUniforms(gl, fractalUniforms, currentOffset, w, h);
-  gl.enable(gl.SCISSOR_TEST);
+  gl.clearColor(0, 0, 0, 0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
 
-  const myGen = renderGen;
-  let tileIdx = 0;
+  function submitNextStep() {
+    if (myGen !== renderGen) { finishCancelled(); return; }
 
-  function submitNextTile() {
-    if (myGen !== renderGen) { finish(); return; }
-    if (tileIdx >= tiles.length) { finish(); return; }
-
-    const tile = tiles[tileIdx++];
-    gl.scissor(tile.x, tile.y, tile.w, tile.h);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, writeState.fbo);
+    gl.viewport(0, 0, w, h);
+    gl.useProgram(progressiveProg);
+    FC.setFractalUniforms(gl, progressiveUniforms, renderOffset, w, h);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, readState.tex);
+    gl.uniform1i(progressiveUniforms.u_state, 0);
+    gl.uniform1i(progressiveUniforms.u_resetState, pass === 0 ? 1 : 0);
+    gl.uniform2f(
+      progressiveUniforms.u_subpixelJitter,
+      SAMPLE_JITTERS[sampleIndex][0],
+      SAMPLE_JITTERS[sampleIndex][1],
+    );
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
     gl.flush();
 
-    function pollTile() {
+    function pollStep() {
       if (myGen !== renderGen) {
         gl.deleteSync(sync);
-        finish();
+        finishCancelled();
         return;
       }
-      const status = gl.getSyncParameter(sync, gl.SYNC_STATUS);
-      if (status !== gl.SIGNALED) {
-        setTimeout(pollTile, 4);
+      const status = gl.clientWaitSync(sync, 0, 0);
+      if (status === gl.TIMEOUT_EXPIRED) {
+        setTimeout(pollStep, 4);
         return;
       }
       gl.deleteSync(sync);
-      setTimeout(submitNextTile, TILE_BREATHE_MS);
+      const tmp = readState; readState = writeState; writeState = tmp;
+      pass++;
+      drawResolved(readState, true, null);
+      gl.flush();
+      const totalStep = sampleIndex * STEPS_PER_SAMPLE + pass;
+      self.postMessage({
+        type: 'renderProgress',
+        progress: totalStep / (AA_SAMPLES * STEPS_PER_SAMPLE),
+        step: pass,
+        sample: sampleIndex + 1,
+        samples: AA_SAMPLES,
+      });
+
+      if (pass >= STEPS_PER_SAMPLE) {
+        finishCurrentSample();
+      } else if (pass % ACTIVE_CHECK_INTERVAL === 0) {
+        checkForActiveRays((hasActiveRays) => {
+          if (hasActiveRays) setTimeout(submitNextStep, 0);
+          else finishCurrentSample();
+        });
+      } else {
+        setTimeout(submitNextStep, 0);
+      }
     }
-    setTimeout(pollTile, 4);
+    setTimeout(pollStep, 4);
   }
 
-  function finish() {
-    gl.disable(gl.SCISSOR_TEST);
+  function checkForActiveRays(onResult) {
+    const query = gl.createQuery();
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    tileRendering = false;
+    gl.viewport(0, 0, w, h);
+    gl.useProgram(activeRayProg);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, readState.tex);
+    gl.uniform1i(activeRayUniforms.u_state, 0);
+    gl.colorMask(false, false, false, false);
+    gl.beginQuery(gl.ANY_SAMPLES_PASSED_CONSERVATIVE, query);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.endQuery(gl.ANY_SAMPLES_PASSED_CONSERVATIVE);
+    gl.colorMask(true, true, true, true);
+    gl.flush();
 
-    if (myGen !== renderGen) {
-      if (pendingOffset) {
-        currentOffset = pendingOffset;
-        pendingOffset = null;
-        renderFractalToFBO();
+    function pollQuery() {
+      if (myGen !== renderGen) {
+        gl.deleteQuery(query);
+        finishCancelled();
+        return;
       }
+      if (!gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE)) {
+        setTimeout(pollQuery, 4);
+        return;
+      }
+      const hasActiveRays = !!gl.getQueryParameter(query, gl.QUERY_RESULT);
+      gl.deleteQuery(query);
+      onResult(hasActiveRays);
+    }
+    setTimeout(pollQuery, 4);
+  }
+
+  function finishCurrentSample() {
+    accumulateSample(readState);
+    sampleIndex++;
+    if (sampleIndex >= AA_SAMPLES) {
+      finishSuccess();
       return;
     }
+    pass = 0;
+    setTimeout(submitNextStep, 0);
+  }
 
-    if (!fboAValid) {
-      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fboB.fbo);
-      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, fboA.fbo);
-      gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
-      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
-      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-      fboAValid = true;
-      const tmp = fboA; fboA = fboB; fboB = tmp;
-      const dispA = buildDispFromFBO(fboA, w, h);
-      dispTexA = uploadDispTex(dispTexA, dispA, w, h);
-      if (!dispTexB) dispTexB = uploadDispTex(dispTexB, dispA, w, h);
+  function finishCancelled() {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    progressiveRendering = false;
+    if (pendingOffset) {
+      currentOffset = pendingOffset;
+      pendingOffset = null;
+      renderFractalToFBO();
+    }
+  }
 
-      function saveFBOToMain() {
+  function finishSuccess() {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    progressiveRendering = false;
+    if (myGen !== renderGen) { finishCancelled(); return; }
+
+    // Convert the float state texture into the regular display/cache FBO.
+    drawResolved(readState, false, fboB.fbo);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const tmp = fboA; fboA = fboB; fboB = tmp;
+    fboAValid = true;
+    drawDisplay(0.0, 0.0);
+    gl.flush();
+    self.postMessage({ type: 'renderDone' });
+
+    if (wasInitialRender) {
+      setTimeout(() => {
+        if (myGen !== renderGen || !fboAValid) return;
         gl.bindFramebuffer(gl.FRAMEBUFFER, fboA.fbo);
         const pixels = new Uint8Array(w * h * 4);
         gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         self.postMessage({ type: 'cacheFBO', pixels: pixels.buffer, w, h }, [pixels.buffer]);
-      }
-
-      // 播放入场动画（sorted → normal）
-      const introStart = performance.now();
-      function introTick() {
-        const p = Math.min((performance.now() - introStart) / INTRO_MS, 1.0);
-        drawDisplay(0.0, 1.0 - p);
-        gl.flush();
-        if (p < 1.0) {
-          setTimeout(introTick, 16);
-        } else {
-          saveFBOToMain();
-        }
-      }
-      setTimeout(introTick, 16);
-      self.postMessage({ type: 'renderDone' });
-    } else {
-      // create displacement map for transition target
-      const dispB = buildDispFromFBO(fboB, w, h);
-      dispTexB = uploadDispTex(dispTexB, dispB, w, h);
-      isTransitioning = true;
-      transitionStart = performance.now();
-      startTransitionLoop();
-      self.postMessage({ type: 'renderDone' });
+      }, 0);
     }
 
     if (pendingOffset) {
@@ -240,7 +327,7 @@ function renderFractalToFBO() {
     }
   }
 
-  submitNextTile();
+  submitNextStep();
 }
 
 // ── Message handler ────────────────────────────────────────────────────────
@@ -259,14 +346,30 @@ self.addEventListener('message', (e) => {
       return;
     }
 
-    fractalProg = FC.buildProgram(gl, FC.VERT_SRC, FC.FRAG_SRC_HQ);
+    if (!gl.getExtension('EXT_color_buffer_float')) {
+      self.postMessage({ type: 'initError', reason: 'Floating-point render targets are unavailable' });
+      return;
+    }
+
+    progressiveProg = FC.buildProgram(gl, FC.VERT_SRC, FC.FRAG_SRC_PROGRESSIVE);
+    accumulateProg = FC.buildProgram(gl, FC.VERT_SRC, FC.ACCUMULATE_FRAG_SRC);
+    activeRayProg = FC.buildProgram(gl, FC.VERT_SRC, FC.ACTIVE_RAY_FRAG_SRC);
+    resolveProg = FC.buildProgram(gl, FC.VERT_SRC, FC.PROGRESSIVE_RESOLVE_FRAG_SRC);
     displayProg = FC.buildProgram(gl, FC.VERT_SRC, FC.DISPLAY_FRAG_SRC);
-    if (!fractalProg || !displayProg) {
+    if (!progressiveProg || !accumulateProg || !activeRayProg || !resolveProg || !displayProg) {
       self.postMessage({ type: 'initError', reason: 'Shader compilation failed' });
       return;
     }
 
-    fractalUniforms = FC.cacheFractalUniforms(gl, fractalProg);
+    progressiveUniforms = FC.cacheFractalUniforms(gl, progressiveProg);
+    progressiveUniforms.u_state = gl.getUniformLocation(progressiveProg, 'u_state');
+    progressiveUniforms.u_resetState = gl.getUniformLocation(progressiveProg, 'u_resetState');
+    progressiveUniforms.u_subpixelJitter = gl.getUniformLocation(progressiveProg, 'u_subpixelJitter');
+    accumulateUniforms.u_sampleState = gl.getUniformLocation(accumulateProg, 'u_sampleState');
+    activeRayUniforms.u_state = gl.getUniformLocation(activeRayProg, 'u_state');
+    resolveUniforms.u_accum = gl.getUniformLocation(resolveProg, 'u_accum');
+    resolveUniforms.u_currentState = gl.getUniformLocation(resolveProg, 'u_currentState');
+    resolveUniforms.u_includeCurrent = gl.getUniformLocation(resolveProg, 'u_includeCurrent');
     displayUniforms = {
       u_texA:       gl.getUniformLocation(displayProg, 'u_texA'),
       u_texB:       gl.getUniformLocation(displayProg, 'u_texB'),
@@ -286,6 +389,7 @@ self.addEventListener('message', (e) => {
     if (gl) gl.viewport(0, 0, e.data.w, e.data.h);
     fboAValid = false;
     renderGen++;
+    renderFractalToFBO();
 
   } else if (type === 'mouseenter') {
     if (!fboAValid) renderFractalToFBO();

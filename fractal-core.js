@@ -267,6 +267,113 @@ void main() {
   fragColor = vec4(col, 1.0);
 }`;
 
+// One ray-marching step per draw call. The RGBA32F backbuffer stores both the
+// settled RGB result and the current travel distance in alpha:
+//   alpha >= 0  ray is still marching (alpha = travel distance)
+//   alpha <  0  ray is finished and RGB is its final colour
+// This mirrors Fragmentarium's backbuffer/subframe approach: every draw reads
+// the previous subframe, advances once, then publishes the new state.
+const FRAG_MAIN_PROGRESSIVE = `
+uniform sampler2D u_state;
+uniform int u_resetState;
+uniform vec2 u_subpixelJitter;
+
+vec3 progressiveRayDirection(vec2 uv) {
+  vec3 ro = u_camPos;
+  vec3 target = vec3(7.9, 0.0, 1.55);
+  vec3 fwd = normalize(target - ro);
+  vec3 worldUp = abs(fwd.y) < 0.99 ? vec3(0,1,0) : vec3(0,0,1);
+  vec3 right = normalize(cross(worldUp, fwd));
+  vec3 up = cross(fwd, right);
+  float aspect = u_resolution.x / u_resolution.y;
+  vec2 ndc = (uv - 0.5) * 2.0;
+  ndc.x *= aspect;
+  return normalize(fwd + ndc.x * tan(u_fov * 0.5) * right
+                       + ndc.y * tan(u_fov * 0.5) * up);
+}
+
+vec3 shadeProgressiveHit(vec3 p, vec3 ro, vec2 uv) {
+  vec3 normal = calcNormal(p);
+  float ao = calcAO(p, normal);
+  vec3 viewDir = normalize(ro - p);
+  vec3 ldir = normalize(u_lightDir);
+  float shadow = softShadow(p + 0.0001 * normal, -ldir, 0.06, 5.0, 0.08);
+  vec3 col = phongLighting(p, normal, viewDir);
+  col *= ao * (0.4 + 0.6 * shadow);
+  col = aces(col * 1.2);
+  col = pow(col, vec3(1.0 / 2.2));
+  col *= 1.0 - 0.4 * pow(length(uv * 2.0 - 1.0), 2.0);
+  return col;
+}
+
+void main() {
+  vec4 previous = texture(u_state, vUv);
+  if (u_resetState == 0 && previous.a < 0.0) {
+    fragColor = previous;
+    return;
+  }
+
+  float travel = (u_resetState == 1) ? 0.0 : previous.a;
+  vec3 ro = u_camPos;
+  vec2 sampleUv = vUv + u_subpixelJitter / u_resolution;
+  vec3 rd = progressiveRayDirection(sampleUv);
+  vec3 p = ro + travel * rd;
+  float dist = sdf(p);
+
+  if (isnan(dist) || isinf(dist)) {
+    fragColor = vec4(0.0, 0.0, 0.0, -1001.0);
+  } else if (dist < 0.000001) {
+    fragColor = vec4(shadeProgressiveHit(p, ro, vUv), -(travel + 1.0));
+  } else if (travel > 60.0) {
+    // Preserve renderPixel() ordering: test the current point first, then stop
+    // if the ray had already crossed the far limit before this iteration.
+    fragColor = vec4(0.0, 0.0, 0.0, -1001.0);
+  } else {
+    travel += max(dist, 0.0000005);
+    fragColor = vec4((u_resetState == 1) ? vec3(0.0) : previous.rgb, travel);
+  }
+}`;
+
+const ACCUMULATE_FRAG_SRC = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 fragColor;
+uniform sampler2D u_sampleState;
+void main() {
+  vec4 sampleState = texture(u_sampleState, vUv);
+  // Match FRAG_MAIN_HQ exactly: every subpixel sample contributes one quarter,
+  // including rays that reached the 512-step limit without a hit (black).
+  fragColor = vec4(sampleState.rgb, 1.0);
+}`;
+
+const ACTIVE_RAY_FRAG_SRC = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 fragColor;
+uniform sampler2D u_state;
+void main() {
+  if (texture(u_state, vUv).a < 0.0) discard;
+  fragColor = vec4(1.0);
+}`;
+
+const PROGRESSIVE_RESOLVE_FRAG_SRC = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 fragColor;
+uniform sampler2D u_accum;
+uniform sampler2D u_currentState;
+uniform float u_includeCurrent;
+void main() {
+  vec4 accumulated = texture(u_accum, vUv);
+  vec4 current = texture(u_currentState, vUv);
+  float currentWeight = (current.a < 0.0 ? 1.0 : 0.0) * u_includeCurrent;
+  float weight = accumulated.a + currentWeight;
+  vec3 color = weight > 0.0
+    ? (accumulated.rgb + current.rgb * currentWeight) / weight
+    : vec3(0.0);
+  fragColor = vec4(color, 1.0);
+}`;
+
 const DISPLAY_FRAG_SRC = `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -462,6 +569,42 @@ function makeFBO(g, w, h) {
   return { fbo, tex, w, h };
 }
 
+function makeStateFBO(g, w, h) {
+  const tex = g.createTexture();
+  g.bindTexture(g.TEXTURE_2D, tex);
+  // 32-bit is required: the marcher uses a 1e-6 hit threshold, which RGBA16F
+  // cannot preserve once the accumulated travel distance is a few units.
+  g.texImage2D(g.TEXTURE_2D, 0, g.RGBA32F, w, h, 0, g.RGBA, g.FLOAT, null);
+  g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MIN_FILTER, g.NEAREST);
+  g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MAG_FILTER, g.NEAREST);
+  g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_S, g.CLAMP_TO_EDGE);
+  g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_T, g.CLAMP_TO_EDGE);
+  const fbo = g.createFramebuffer();
+  g.bindFramebuffer(g.FRAMEBUFFER, fbo);
+  g.framebufferTexture2D(g.FRAMEBUFFER, g.COLOR_ATTACHMENT0, g.TEXTURE_2D, tex, 0);
+  const complete = g.checkFramebufferStatus(g.FRAMEBUFFER) === g.FRAMEBUFFER_COMPLETE;
+  g.bindFramebuffer(g.FRAMEBUFFER, null);
+  g.bindTexture(g.TEXTURE_2D, null);
+  return { fbo, tex, w, h, complete };
+}
+
+function makeAccumFBO(g, w, h) {
+  const tex = g.createTexture();
+  g.bindTexture(g.TEXTURE_2D, tex);
+  g.texImage2D(g.TEXTURE_2D, 0, g.RGBA32F, w, h, 0, g.RGBA, g.FLOAT, null);
+  g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MIN_FILTER, g.NEAREST);
+  g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MAG_FILTER, g.NEAREST);
+  g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_S, g.CLAMP_TO_EDGE);
+  g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_T, g.CLAMP_TO_EDGE);
+  const fbo = g.createFramebuffer();
+  g.bindFramebuffer(g.FRAMEBUFFER, fbo);
+  g.framebufferTexture2D(g.FRAMEBUFFER, g.COLOR_ATTACHMENT0, g.TEXTURE_2D, tex, 0);
+  const complete = g.checkFramebufferStatus(g.FRAMEBUFFER) === g.FRAMEBUFFER_COMPLETE;
+  g.bindFramebuffer(g.FRAMEBUFFER, null);
+  g.bindTexture(g.TEXTURE_2D, null);
+  return { fbo, tex, w, h, complete };
+}
+
 const UNIFORM_NAMES = [
   'u_time','u_resolution',
   'u_juliaC','u_juliaCOffset','u_rotAxis','u_rotAngle','u_scale','u_bailout',
@@ -509,15 +652,24 @@ function setFractalUniforms(g, u, offset, rw, rh) {
 // Pre-built shader sources
 const FRAG_SRC_HQ   = makeFractalBody({ marchSteps: 512, aoSteps: 8, shadowSteps: 64, hitEps: 0.000001 }) + FRAG_MAIN_HQ;
 const FRAG_SRC_LITE  = makeFractalBody({ marchSteps: 128, aoSteps: 3, shadowSteps: 16, hitEps: 0.0001   }) + FRAG_MAIN_LITE;
+const FRAG_SRC_PROGRESSIVE = makeFractalBody({ marchSteps: 1, aoSteps: 8, shadowSteps: 64, hitEps: 0.000001 }) + FRAG_MAIN_PROGRESSIVE;
+const FRAG_SRC_PROGRESSIVE_LITE = makeFractalBody({ marchSteps: 1, aoSteps: 3, shadowSteps: 16, hitEps: 0.000001 }) + FRAG_MAIN_PROGRESSIVE;
 
 return {
   VERT_SRC,
   FRAG_SRC_HQ,
   FRAG_SRC_LITE,
+  FRAG_SRC_PROGRESSIVE,
+  FRAG_SRC_PROGRESSIVE_LITE,
+  ACCUMULATE_FRAG_SRC,
+  ACTIVE_RAY_FRAG_SRC,
+  PROGRESSIVE_RESOLVE_FRAG_SRC,
   DISPLAY_FRAG_SRC,
   compileShader,
   buildProgram,
   makeFBO,
+  makeStateFBO,
+  makeAccumFBO,
   cacheFractalUniforms,
   setFractalUniforms,
   pixelSortBuildDisp,

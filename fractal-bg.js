@@ -100,6 +100,7 @@ const FractalBG = (() => {
     yEl:       null,
     hint:      null,
     overlay:   null,
+    defaultHint: '',
 
     init() {
       this.el        = document.getElementById('fractalHUD');
@@ -107,6 +108,7 @@ const FractalBG = (() => {
       this.yEl       = document.getElementById('fractalY');
       this.hint      = document.getElementById('fractalHint');
       this.overlay   = document.getElementById('fractalLoadingOverlay');
+      this.defaultHint = this.hint ? this.hint.textContent : '';
     },
 
     showCoords(nx, ny, clientX, clientY, canvasRect) {
@@ -143,6 +145,14 @@ const FractalBG = (() => {
     setComputing(active) {
       if (active) return;
       this.stopLoading();
+      if (this.hint) this.hint.textContent = this.defaultHint;
+    },
+
+    showProgress(progress, step, sample, samples) {
+      if (this.overlay && this.overlay.classList.contains('active')) this.stopLoading();
+      if (!this.hint) return;
+      this.hint.style.opacity = '1';
+      this.hint.textContent = `AA ${sample}/${samples} · Ray step ${step}`;
     },
   };
 
@@ -254,6 +264,8 @@ const FractalBG = (() => {
         console.warn('FractalBG: Worker init failed:', e.data.reason, '— falling back');
         worker.terminate(); worker = null;
         fallbackToMainThread(canvas, cachedFBO);
+      } else if (e.data.type === 'renderProgress') {
+        hud.showProgress(e.data.progress, e.data.step, e.data.sample, e.data.samples);
       } else if (e.data.type === 'renderDone') {
         hud.setComputing(false);
       } else if (e.data.type === 'cacheFBO') {
@@ -291,15 +303,20 @@ const FractalBG = (() => {
     const INTRO_MS       = 1800;
     const TRANSITION_MS  = 3600;
 
-    let gl, fractalProg, displayProg;
-    let fractalUniforms = {}, displayUniforms = {};
+    let gl, fractalProg, progressiveProg, accumulateProg, resolveProg, displayProg;
+    let fractalUniforms = {}, progressiveUniforms = {}, accumulateUniforms = {}, resolveUniforms = {}, displayUniforms = {};
     let fboA = null, fboB = null;
+    let stateA = null, stateB = null;
+    let accumulationFBO = null;
     let fboAValid = false;
     let currentOffset = [0, 0];
     let isTransitioning = false;
     let transitionStart = 0;
     let transitionRAF = null;
     let dispTexA = null, dispTexB = null;
+    let progressiveRendering = false;
+    let pendingOffset = null;
+    let renderGen = 0;
 
     const SORT_THRESH_LO = 8;
     const SORT_THRESH_HI = 250;
@@ -353,7 +370,18 @@ const FractalBG = (() => {
       hud.setComputing(false);
     });
 
+    const supportsFloatState = !!gl.getExtension('EXT_color_buffer_float');
     fractalProg = FC.buildProgram(gl, FC.VERT_SRC, FC.FRAG_SRC_LITE);
+    progressiveProg = supportsFloatState
+      ? FC.buildProgram(gl, FC.VERT_SRC, FC.FRAG_SRC_PROGRESSIVE_LITE)
+      : null;
+    accumulateProg = supportsFloatState
+      ? FC.buildProgram(gl, FC.VERT_SRC, FC.ACCUMULATE_FRAG_SRC)
+      : null;
+    resolveProg = supportsFloatState
+      ? FC.buildProgram(gl, FC.VERT_SRC, FC.PROGRESSIVE_RESOLVE_FRAG_SRC)
+      : null;
+    if (!accumulateProg || !resolveProg) progressiveProg = null;
     displayProg = FC.buildProgram(gl, FC.VERT_SRC, FC.DISPLAY_FRAG_SRC);
     if (!fractalProg || !displayProg) {
       console.warn('FractalBG: shader compilation failed');
@@ -362,6 +390,16 @@ const FractalBG = (() => {
     }
 
     fractalUniforms = FC.cacheFractalUniforms(gl, fractalProg);
+    if (progressiveProg) {
+      progressiveUniforms = FC.cacheFractalUniforms(gl, progressiveProg);
+      progressiveUniforms.u_state = gl.getUniformLocation(progressiveProg, 'u_state');
+      progressiveUniforms.u_resetState = gl.getUniformLocation(progressiveProg, 'u_resetState');
+      progressiveUniforms.u_subpixelJitter = gl.getUniformLocation(progressiveProg, 'u_subpixelJitter');
+      accumulateUniforms.u_sampleState = gl.getUniformLocation(accumulateProg, 'u_sampleState');
+      resolveUniforms.u_accum = gl.getUniformLocation(resolveProg, 'u_accum');
+      resolveUniforms.u_currentState = gl.getUniformLocation(resolveProg, 'u_currentState');
+      resolveUniforms.u_includeCurrent = gl.getUniformLocation(resolveProg, 'u_includeCurrent');
+    }
     displayUniforms = {
       u_texA:       gl.getUniformLocation(displayProg, 'u_texA'),
       u_texB:       gl.getUniformLocation(displayProg, 'u_texB'),
@@ -392,6 +430,34 @@ const FractalBG = (() => {
       gl.uniform1f(displayUniforms.u_intro, intro || 0.0);
       gl.uniform2f(displayUniforms.u_resolution, canvas.width, canvas.height);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+
+    function drawResolved(currentState, includeCurrent, targetFBO) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, targetFBO || null);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.useProgram(resolveProg);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, accumulationFBO.tex);
+      gl.uniform1i(resolveUniforms.u_accum, 0);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, currentState.tex);
+      gl.uniform1i(resolveUniforms.u_currentState, 1);
+      gl.uniform1f(resolveUniforms.u_includeCurrent, includeCurrent ? 1.0 : 0.0);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+
+    function accumulateSample(sampleState) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, accumulationFBO.fbo);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.useProgram(accumulateProg);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, sampleState.tex);
+      gl.uniform1i(accumulateUniforms.u_sampleState, 0);
+      gl.enable(gl.BLEND);
+      gl.blendEquation(gl.FUNC_ADD);
+      gl.blendFunc(gl.ONE, gl.ONE);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.disable(gl.BLEND);
     }
 
     /** 保存 FBO 像素到 IndexedDB */
@@ -436,7 +502,7 @@ const FractalBG = (() => {
       requestAnimationFrame(introTick);
     }
 
-    function renderFractal() {
+    function renderFractalOneShot() {
       const w = canvas.width, h = canvas.height;
 
       if (!fboA || fboA.w !== w || fboA.h !== h) {
@@ -490,6 +556,148 @@ const FractalBG = (() => {
       }
 
       hud.setComputing(false);
+    }
+
+    function renderFractal() {
+      if (!progressiveProg) {
+        renderFractalOneShot();
+        return;
+      }
+
+      const w = canvas.width, h = canvas.height;
+      if (progressiveRendering) {
+        renderGen++;
+        pendingOffset = [...currentOffset];
+        return;
+      }
+
+      const myGen = ++renderGen;
+      const renderOffset = [...currentOffset];
+      const wasInitialRender = !fboAValid;
+      progressiveRendering = true;
+
+      if (!fboA || fboA.w !== w || fboA.h !== h) {
+        fboA = FC.makeFBO(gl, w, h);
+        fboB = FC.makeFBO(gl, w, h);
+        fboAValid = false;
+      }
+      if (!stateA || stateA.w !== w || stateA.h !== h) {
+        stateA = FC.makeStateFBO(gl, w, h);
+        stateB = FC.makeStateFBO(gl, w, h);
+        accumulationFBO = FC.makeAccumFBO(gl, w, h);
+        if (!stateA.complete || !stateB.complete || !accumulationFBO.complete) {
+          progressiveRendering = false;
+          progressiveProg = null;
+          renderFractalOneShot();
+          return;
+        }
+      }
+
+      if (isTransitioning) {
+        isTransitioning = false;
+        if (transitionRAF) { cancelAnimationFrame(transitionRAF); transitionRAF = null; }
+      }
+
+      let readState = stateA;
+      let writeState = stateB;
+      let pass = 0;
+      let sampleIndex = 0;
+      const AA_SAMPLES = 2;
+      const STEPS_PER_SAMPLE = 192;
+      const SAMPLE_JITTERS = [[-0.25, -0.25], [0.25, 0.25]];
+
+      gl.bindFramebuffer(gl.FRAMEBUFFER, accumulationFBO.fbo);
+      gl.viewport(0, 0, w, h);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+
+      function submitNextStep() {
+        if (myGen !== renderGen) { finishCancelled(); return; }
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, writeState.fbo);
+        gl.viewport(0, 0, w, h);
+        gl.useProgram(progressiveProg);
+        FC.setFractalUniforms(gl, progressiveUniforms, renderOffset, w, h);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, readState.tex);
+        gl.uniform1i(progressiveUniforms.u_state, 0);
+        gl.uniform1i(progressiveUniforms.u_resetState, pass === 0 ? 1 : 0);
+        gl.uniform2f(
+          progressiveUniforms.u_subpixelJitter,
+          SAMPLE_JITTERS[sampleIndex][0],
+          SAMPLE_JITTERS[sampleIndex][1],
+        );
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+        const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+        gl.flush();
+        requestAnimationFrame(() => pollStep(sync));
+      }
+
+      function pollStep(sync) {
+        if (myGen !== renderGen) {
+          gl.deleteSync(sync);
+          finishCancelled();
+          return;
+        }
+        const status = gl.clientWaitSync(sync, 0, 0);
+        if (status === gl.TIMEOUT_EXPIRED) {
+          requestAnimationFrame(() => pollStep(sync));
+          return;
+        }
+        gl.deleteSync(sync);
+        const tmp = readState; readState = writeState; writeState = tmp;
+        pass++;
+        drawResolved(readState, true, null);
+        const totalStep = sampleIndex * STEPS_PER_SAMPLE + pass;
+        hud.showProgress(
+          totalStep / (AA_SAMPLES * STEPS_PER_SAMPLE),
+          pass,
+          sampleIndex + 1,
+          AA_SAMPLES,
+        );
+
+        if (pass >= STEPS_PER_SAMPLE) {
+          accumulateSample(readState);
+          sampleIndex++;
+          if (sampleIndex >= AA_SAMPLES) {
+            finishSuccess();
+            return;
+          }
+          pass = 0;
+        }
+        requestAnimationFrame(submitNextStep);
+      }
+
+      function finishCancelled() {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        progressiveRendering = false;
+        if (pendingOffset) {
+          currentOffset = pendingOffset;
+          pendingOffset = null;
+          renderFractal();
+        }
+      }
+
+      function finishSuccess() {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        progressiveRendering = false;
+        if (myGen !== renderGen) { finishCancelled(); return; }
+        drawResolved(readState, false, fboB.fbo);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        const tmp = fboA; fboA = fboB; fboB = tmp;
+        fboAValid = true;
+        drawDisplay(0.0, 0.0);
+        hud.setComputing(false);
+        if (wasInitialRender) setTimeout(saveFBOCache, 0);
+        if (pendingOffset) {
+          currentOffset = pendingOffset;
+          pendingOffset = null;
+          renderFractal();
+        }
+      }
+
+      submitNextStep();
     }
 
     // 有缓存 → 直接上传到 FBO，播放 intro，跳过 GPU 分形计算
